@@ -53,17 +53,24 @@ export async function makeExcel(data, query) {
 
     savedFileUri = result.uri;
 
-    // Send notification
-    await LocalNotifications.schedule({
-      notifications: [
-        {
-          title: 'Download Complete',
-          body: `${filename} saved to Downloads`,
-          id: Date.now() % 2147483647,
-          actionTypeId: 'DOWNLOAD_COMPLETE',
-        },
-      ],
-    });
+    // Send notification (non-critical — don't fail the export if notifications aren't enabled)
+    try {
+      const permStatus = await LocalNotifications.checkPermissions();
+      if (permStatus.display === 'granted') {
+        await LocalNotifications.schedule({
+          notifications: [
+            {
+              title: 'Download Complete',
+              body: `${filename} saved to Downloads`,
+              id: Date.now() % 2147483647,
+              actionTypeId: 'DOWNLOAD_COMPLETE',
+            },
+          ],
+        });
+      }
+    } catch (e) {
+      console.warn('Could not send notification:', e.message);
+    }
 
     return { uri: result.uri, filename };
   } else {

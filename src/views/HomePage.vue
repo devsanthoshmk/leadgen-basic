@@ -357,6 +357,7 @@ export default {
       detailOpen: false,
       detailRow: null,
       infoOpen: false,
+      notificationsGranted: false,
       // icons
       logoGithub, logoLinkedin, logoInstagram, logoTwitter, shareSocialOutline,
       downloadOutline, arrowBackOutline,
@@ -392,9 +393,18 @@ export default {
   },
   async mounted() {
     if (Capacitor.isNativePlatform()) {
-      const perm = await LocalNotifications.checkPermissions();
-      if (perm.display !== 'granted') {
-        await LocalNotifications.requestPermissions();
+      // Check current notification permission status
+      await this.syncNotificationStatus();
+
+      // Show custom pre-prompt on first launch or periodically (every 3 days)
+      if (!this.notificationsGranted) {
+        const lastAsked = localStorage.getItem('notif_prompt_last');
+        const now = Date.now();
+        const THREE_DAYS = 3 * 24 * 60 * 60 * 1000;
+        if (!lastAsked || (now - Number(lastAsked)) > THREE_DAYS) {
+          localStorage.setItem('notif_prompt_last', String(now));
+          await this.showNotificationPrePrompt();
+        }
       }
 
       try {
@@ -448,6 +458,57 @@ export default {
     App.removeAllListeners();
   },
   methods: {
+    async syncNotificationStatus() {
+      try {
+        const perm = await LocalNotifications.checkPermissions();
+        this.notificationsGranted = perm.display === 'granted';
+      } catch {
+        this.notificationsGranted = false;
+      }
+    },
+    async requestNotificationPermission() {
+      try {
+        const result = await LocalNotifications.requestPermissions();
+        this.notificationsGranted = result.display === 'granted';
+      } catch {
+        this.notificationsGranted = false;
+      }
+      return this.notificationsGranted;
+    },
+    async showNotificationPrePrompt() {
+      const alert = await alertController.create({
+        header: 'Stay Updated',
+        message: 'Get notified when your lead search completes and files are downloaded — even if the app is in the background.',
+        buttons: [
+          { text: 'Not Now', role: 'cancel' },
+          {
+            text: 'Allow',
+            handler: () => {
+              this.requestNotificationPermission();
+            },
+          },
+        ],
+      });
+      await alert.present();
+    },
+    async showNotificationNudgeToast() {
+      const toast = await toastController.create({
+        message: 'Enable notifications to know when downloads finish.',
+        duration: 5000,
+        position: 'bottom',
+        color: 'dark',
+        buttons: [
+          {
+            text: 'Allow',
+            handler: () => {
+              this.requestNotificationPermission();
+            },
+          },
+          { text: 'Dismiss', role: 'cancel' },
+        ],
+      });
+      await toast.present();
+    },
     toggleSortDir() {
       this.sortAsc = !this.sortAsc;
     },
@@ -496,7 +557,7 @@ export default {
 
       try {
         this.row_datas = await search(this.input);
-        if (Capacitor.isNativePlatform()) {
+        if (Capacitor.isNativePlatform() && this.notificationsGranted) {
           try {
             const notifId = Math.floor(Math.random() * 2147483646) + 1;
             await LocalNotifications.schedule({
@@ -539,6 +600,12 @@ export default {
         if (Capacitor.isNativePlatform()) {
           this.showShare = true;
           this.downloadedUri = result.uri;
+          // Nudge user if notifications aren't enabled
+          await this.syncNotificationStatus();
+          if (!this.notificationsGranted) {
+            await this.showNotificationNudgeToast();
+            return;
+          }
         }
         const toast = await toastController.create({
           message: 'Leads exported to Downloads', duration: 3000, position: 'bottom', color: 'success',
