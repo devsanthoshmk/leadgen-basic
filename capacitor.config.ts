@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.globexdata.places',
-  appName: 'GlobexData',
+  appId: 'in.mergex.leadgen',
+  appName: 'Mergex LeadGen',
   webDir: 'dist',
   plugins: {
     CapacitorHttp: {
@@ -10,7 +10,7 @@ const config: CapacitorConfig = {
     },
     LocalNotifications: {
       smallIcon: 'ic_notification',
-      iconColor: '#488AFF',
+      iconColor: '#E8FF00',
     },
   },
 };

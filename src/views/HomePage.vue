@@ -1,46 +1,38 @@
 <template>
   <ion-page>
     <ion-header>
-      <ion-toolbar color="dark">
+      <ion-toolbar>
         <ion-title>
           <div class="header-brand">
-            <svg
-              xmlns="http://www.w3.org/2000/svg" width="1em" height="1em" viewBox="0 0 24 24"
-              stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"
-              class="brand-icon"
-            >
-              <path stroke="none" d="M0 0h24v24H0z" fill="none"></path>
-              <path d="M12 9.5m-2.5 0a2.5 2.5 0 1 0 5 0a2.5 2.5 0 1 0 -5 0"></path>
-              <path d="M6.428 12.494l7.314 -9.252"></path>
-              <path d="M10.002 7.935l-2.937 -2.545"></path>
-              <path d="M17.693 6.593l-8.336 9.979"></path>
-              <path d="M17.591 6.376c.472 .907 .715 1.914 .709 2.935a7.263 7.263 0 0 1 -.72 3.18a19.085 19.085 0 0 1 -2.089 3c-.784 .933 -1.49 1.93 -2.11 2.98c-.314 .62 -.568 1.27 -.757 1.938c-.121 .36 -.277 .591 -.622 .591c-.315 0 -.463 -.136 -.626 -.593a10.595 10.595 0 0 0 -.779 -1.978a18.18 18.18 0 0 0 -1.423 -2.091c-.877 -1.184 -2.179 -2.535 -2.853 -4.071a7.077 7.077 0 0 1 -.621 -2.967a6.226 6.226 0 0 1 1.476 -4.055a6.25 6.25 0 0 1 4.811 -2.245a6.462 6.462 0 0 1 1.918 .284a6.255 6.255 0 0 1 3.686 3.092z"></path>
-            </svg>
-            Globex Places Data
+            <span class="brand-logo">M</span>
+            <span class="brand-name">Mergex <span class="brand-accent">LeadGen</span></span>
           </div>
         </ion-title>
-        <ion-buttons slot="end" v-if="view === 'results'">
-          <ion-button @click="newSearch" fill="clear" color="light">
+        <ion-buttons slot="end">
+          <ion-button v-if="view === 'results'" @click="newSearch" fill="clear">
             <ion-icon :icon="arrowBackOutline" slot="icon-only"></ion-icon>
+          </ion-button>
+          <ion-button @click="infoOpen = true" fill="clear">
+            <ion-icon :icon="informationCircleOutline" slot="icon-only"></ion-icon>
           </ion-button>
         </ion-buttons>
       </ion-toolbar>
 
       <!-- Results toolbar -->
-      <ion-toolbar v-if="view === 'results'" color="light">
-        <ion-chip color="dark" outline>
-          <ion-label>{{ row_datas.length }} results</ion-label>
+      <ion-toolbar v-if="view === 'results'" class="results-toolbar">
+        <ion-chip class="results-chip">
+          <ion-label>{{ row_datas.length }} leads found</ion-label>
         </ion-chip>
         <ion-buttons slot="end">
-          <ion-button v-if="!downloadedUri" @click="downloadExcel" color="success" fill="solid" size="small">
+          <ion-button v-if="!downloadedUri" @click="downloadExcel" fill="solid" size="small" class="action-btn">
             <ion-icon :icon="downloadOutline" slot="start"></ion-icon>
-            Download
+            Export
           </ion-button>
-          <ion-button v-else @click="openDownloadedFile" color="success" fill="solid" size="small">
+          <ion-button v-else @click="openDownloadedFile" fill="solid" size="small" class="action-btn">
             <ion-icon :icon="openOutline" slot="start"></ion-icon>
             Open
           </ion-button>
-          <ion-button v-if="showShare" @click="shareFile" color="tertiary" fill="solid" size="small">
+          <ion-button v-if="showShare" @click="shareFile" fill="solid" size="small" class="share-btn">
             <ion-icon :icon="shareSocialOutline" slot="start"></ion-icon>
             Share
           </ion-button>
@@ -52,20 +44,31 @@
 
       <!-- SEARCH VIEW -->
       <div v-if="view === 'search'" class="content-center">
+        <div class="search-hero">
+          <div class="hero-badge">SALES INTELLIGENCE</div>
+          <h1 class="hero-title">Find Your Next<br/><span class="accent">Qualified Lead</span></h1>
+          <p class="hero-sub">Search businesses by type and location. Export leads with phone, email, and address data for your sales pipeline.</p>
+        </div>
         <div class="search-container" :class="{ shake: shaking }">
           <ion-searchbar
             v-model="input"
-            placeholder="Enter business/place type & location"
+            placeholder="e.g. Restaurants in Chennai"
             :debounce="0"
             @keyup.enter="doSearch"
             show-clear-button="focus"
+            class="leadgen-search"
           ></ion-searchbar>
           <div class="action-buttons">
-            <ion-button :disabled="searching" @click="doSearch" :color="searching ? 'medium' : 'success'" expand="block">
+            <ion-button :disabled="searching" @click="doSearch" expand="block" class="search-btn">
               <ion-spinner v-if="searching" name="crescent" slot="start"></ion-spinner>
-              {{ searching ? 'Searching...' : 'Search' }}
+              {{ searching ? 'Finding leads...' : 'Generate Leads' }}
             </ion-button>
           </div>
+        </div>
+        <div class="search-tags">
+          <span class="tag" @click="input = 'Hotels in Bangalore'; doSearch()">Hotels in Bangalore</span>
+          <span class="tag" @click="input = 'Cafes in Mumbai'; doSearch()">Cafes in Mumbai</span>
+          <span class="tag" @click="input = 'Gyms in Hyderabad'; doSearch()">Gyms in Hyderabad</span>
         </div>
       </div>
 
@@ -76,7 +79,7 @@
         <div class="filter-bar">
           <ion-searchbar
             v-model="filterText"
-            placeholder="Filter results..."
+            placeholder="Filter leads..."
             :debounce="250"
             show-clear-button="focus"
             class="filter-search"
@@ -111,11 +114,11 @@
               </div>
               <p v-if="row.address" class="card-address">{{ row.address }}</p>
               <div class="card-actions">
-                <ion-chip v-if="row.completePhoneNumber" color="primary" outline @click.stop="callPhone(row.completePhoneNumber)">
+                <ion-chip v-if="row.completePhoneNumber" outline @click.stop="callPhone(row.completePhoneNumber)" class="lead-chip phone-chip">
                   <ion-icon :icon="callOutline"></ion-icon>
                   <ion-label>{{ row.completePhoneNumber }}</ion-label>
                 </ion-chip>
-                <ion-chip v-if="row.url" color="secondary" outline @click.stop="openUrl(row.url)">
+                <ion-chip v-if="row.url" outline @click.stop="openUrl(row.url)" class="lead-chip web-chip">
                   <ion-icon :icon="globeOutline"></ion-icon>
                   <ion-label>Website</ion-label>
                 </ion-chip>
@@ -124,7 +127,7 @@
           </ion-card>
 
           <div v-if="filteredData.length === 0" class="no-results">
-            <p>No results match your filter.</p>
+            <p>No leads match your filter.</p>
           </div>
         </div>
       </div>
@@ -133,7 +136,7 @@
       <ion-modal :is-open="detailOpen" @didDismiss="detailOpen = false">
         <ion-header>
           <ion-toolbar>
-            <ion-title>Details</ion-title>
+            <ion-title>Lead Details</ion-title>
             <ion-buttons slot="end">
               <ion-button @click="detailOpen = false">Close</ion-button>
             </ion-buttons>
@@ -190,20 +193,101 @@
         </ion-content>
       </ion-modal>
 
+      <!-- INFO MODAL -->
+      <ion-modal :is-open="infoOpen" @didDismiss="infoOpen = false">
+        <ion-header>
+          <ion-toolbar>
+            <ion-title>About Mergex</ion-title>
+            <ion-buttons slot="end">
+              <ion-button @click="infoOpen = false">Close</ion-button>
+            </ion-buttons>
+          </ion-toolbar>
+        </ion-header>
+        <ion-content class="ion-padding info-content">
+          <div class="info-hero">
+            <span class="info-logo">M</span>
+            <h2>Mergex</h2>
+            <p class="info-tagline">One System. Zero Friction.</p>
+          </div>
+
+          <div class="info-section">
+            <h3>About</h3>
+            <p>Mergex engineers the systems behind modern businesses — unifying strategy, software, AI, and growth into one scalable foundation. We replace fragmented tools with a single integrated platform.</p>
+          </div>
+
+          <div class="info-section">
+            <h3>Our Divisions</h3>
+            <div class="info-card">
+              <strong>Mergex Systems</strong>
+              <p>Business infrastructure, software platforms, workflow automation, and AI integrations.</p>
+            </div>
+            <div class="info-card">
+              <strong>Mergex Labs</strong>
+              <p>High-end production — AI-powered creative work, advertisements, visual assets, and video content.</p>
+            </div>
+          </div>
+
+          <div class="info-section">
+            <h3>Contact</h3>
+            <ion-list class="info-links">
+              <ion-item button @click="openUrl('https://mergex.in')">
+                <ion-icon :icon="globeOutline" slot="start"></ion-icon>
+                <ion-label>mergex.in</ion-label>
+              </ion-item>
+              <ion-item button @click="openUrl('mailto:hello@mergex.in')">
+                <ion-icon :icon="mailOutline" slot="start"></ion-icon>
+                <ion-label>hello@mergex.in</ion-label>
+              </ion-item>
+              <ion-item button @click="openUrl('https://wa.me/919042172025')">
+                <ion-icon :icon="callOutline" slot="start"></ion-icon>
+                <ion-label>+91 9042172025</ion-label>
+              </ion-item>
+            </ion-list>
+          </div>
+
+          <div class="info-section">
+            <h3>Follow Us</h3>
+            <div class="info-socials">
+              <a href="https://www.linkedin.com/company/mergex" target="_blank" rel="noopener noreferrer">
+                <ion-icon :icon="logoLinkedin"></ion-icon>
+              </a>
+              <a href="https://twitter.com/mergex" target="_blank" rel="noopener noreferrer">
+                <ion-icon :icon="logoTwitter"></ion-icon>
+              </a>
+              <a href="https://www.instagram.com/mergex" target="_blank" rel="noopener noreferrer">
+                <ion-icon :icon="logoInstagram"></ion-icon>
+              </a>
+            </div>
+          </div>
+
+          <div class="info-section">
+            <h3>Developer</h3>
+            <ion-list class="info-links">
+              <ion-item button @click="openUrl('https://github.com/devsanthoshmk')">
+                <ion-icon :icon="logoGithub" slot="start"></ion-icon>
+                <ion-label>GitHub — devsanthoshmk</ion-label>
+              </ion-item>
+              <ion-item button @click="openUrl('https://www.linkedin.com/in/santhosh-m-k/')">
+                <ion-icon :icon="logoLinkedin" slot="start"></ion-icon>
+                <ion-label>LinkedIn — Santhosh M K</ion-label>
+              </ion-item>
+              <ion-item button @click="openUrl('https://www.instagram.com/mksantho.sh/')">
+                <ion-icon :icon="logoInstagram" slot="start"></ion-icon>
+                <ion-label>Instagram — @mksantho.sh</ion-label>
+              </ion-item>
+            </ion-list>
+          </div>
+        </ion-content>
+      </ion-modal>
+
     </ion-content>
 
     <ion-footer>
       <ion-toolbar class="footer-toolbar">
-        <div class="social-links">
-          <a href="https://github.com/devsanthoshmk" target="_blank" rel="noopener noreferrer" aria-label="GitHub">
-            <ion-icon :icon="logoGithub"></ion-icon>
-          </a>
-          <a href="https://www.linkedin.com/in/santhosh-m-k/" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn">
-            <ion-icon :icon="logoLinkedin"></ion-icon>
-          </a>
-          <a href="https://www.instagram.com/mksantho.sh/" target="_blank" rel="noopener noreferrer" aria-label="Instagram">
-            <ion-icon :icon="logoInstagram"></ion-icon>
-          </a>
+        <div class="footer-content">
+          <span class="footer-brand">Mergex</span>
+          <span class="footer-dot">&middot;</span>
+          <span class="footer-text">Scale Is Not Luck. It's Structure.</span>
         </div>
       </ion-toolbar>
     </ion-footer>
@@ -221,10 +305,10 @@ import {
   alertController,
 } from '@ionic/vue';
 import {
-  logoGithub, logoLinkedin, logoInstagram, shareSocialOutline,
+  logoGithub, logoLinkedin, logoInstagram, logoTwitter, shareSocialOutline,
   downloadOutline, arrowBackOutline, starSharp, starOutline,
   callOutline, globeOutline, openOutline, navigateOutline,
-  arrowUpOutline, arrowDownOutline,
+  arrowUpOutline, arrowDownOutline, informationCircleOutline, mailOutline,
 } from 'ionicons/icons';
 import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
@@ -246,7 +330,7 @@ export default {
   data() {
     return {
       input: '',
-      view: 'search', // 'search' | 'results'
+      view: 'search',
       searching: false,
       shaking: false,
       row_datas: [],
@@ -258,18 +342,18 @@ export default {
       sortAsc: true,
       detailOpen: false,
       detailRow: null,
+      infoOpen: false,
       // icons
-      logoGithub, logoLinkedin, logoInstagram, shareSocialOutline,
+      logoGithub, logoLinkedin, logoInstagram, logoTwitter, shareSocialOutline,
       downloadOutline, arrowBackOutline,
       starIcon: starSharp, starOutlineIcon: starOutline,
       callOutline, globeOutline, openOutline, navigateOutline,
-      arrowUpOutline, arrowDownOutline,
+      arrowUpOutline, arrowDownOutline, informationCircleOutline, mailOutline,
     };
   },
   computed: {
     filteredData() {
       let data = [...this.row_datas];
-      // filter
       if (this.filterText) {
         const q = this.filterText.toLowerCase();
         data = data.filter(r =>
@@ -279,7 +363,6 @@ export default {
           r.completePhoneNumber.includes(q)
         );
       }
-      // sort
       const key = this.sortBy;
       data.sort((a, b) => {
         const av = a[key] ?? '';
@@ -295,32 +378,26 @@ export default {
   },
   async mounted() {
     if (Capacitor.isNativePlatform()) {
-      // Request notification permission
       const perm = await LocalNotifications.checkPermissions();
-      console.log('[NOTIF] Current permission:', JSON.stringify(perm));
       if (perm.display !== 'granted') {
-        const reqResult = await LocalNotifications.requestPermissions();
-        console.log('[NOTIF] Permission request result:', JSON.stringify(reqResult));
+        await LocalNotifications.requestPermissions();
       }
 
-      // Create notification channel for Android 8+
       try {
         await LocalNotifications.createChannel({
           id: 'search-updates',
-          name: 'Search Updates',
-          description: 'Notifications when search completes',
+          name: 'Lead Search Updates',
+          description: 'Notifications when lead search completes',
           importance: 5,
           visibility: 1,
           vibration: true,
         });
-        console.log('[NOTIF] Channel "search-updates" created');
       } catch (chErr) {
         console.error('[NOTIF] Channel creation failed:', chErr);
       }
 
-      // Listen for notifications while app is in foreground
       LocalNotifications.addListener('localNotificationReceived', (notification) => {
-        console.log('[NOTIF] Received in foreground:', JSON.stringify(notification));
+        console.log('[NOTIF] Received:', JSON.stringify(notification));
       });
 
       if (Capacitor.getPlatform() === 'android') {
@@ -332,16 +409,17 @@ export default {
         }
       }
 
-      // Handle hardware back button
       App.addListener('backButton', async () => {
-        if (this.detailOpen) {
+        if (this.infoOpen) {
+          this.infoOpen = false;
+        } else if (this.detailOpen) {
           this.detailOpen = false;
         } else if (this.view === 'results') {
           this.newSearch();
         } else {
           const alert = await alertController.create({
-            header: 'Exit App',
-            message: 'Are you sure you want to exit the app?',
+            header: 'Exit Mergex LeadGen',
+            message: 'Are you sure you want to exit?',
             buttons: [
               { text: 'Cancel', role: 'cancel' },
               { text: 'Exit', handler: () => App.exitApp() },
@@ -364,8 +442,8 @@ export default {
       try {
         await ForegroundService.startForegroundService({
           id: 1001,
-          title: 'GlobexData',
-          body: 'Searching for places data...',
+          title: 'Mergex LeadGen',
+          body: 'Finding leads for your sales pipeline...',
           smallIcon: 'ic_stat_icon_config_sample',
         });
       } catch (e) {
@@ -396,7 +474,7 @@ export default {
 
       if (Capacitor.isNativePlatform()) {
         const toast = await toastController.create({
-          message: 'Searching in background... You can close the app.',
+          message: 'Finding leads in background... You can close the app.',
           duration: 5000, position: 'bottom', color: 'dark',
         });
         await toast.present();
@@ -407,34 +485,32 @@ export default {
         if (Capacitor.isNativePlatform()) {
           try {
             const notifId = Math.floor(Math.random() * 2147483646) + 1;
-            console.log('[NOTIF] Scheduling search complete notification, id:', notifId);
-            const result = await LocalNotifications.schedule({
+            await LocalNotifications.schedule({
               notifications: [{
-                title: 'Search Complete',
-                body: `Found ${this.row_datas.length} results for "${this.input}"`,
+                title: 'Leads Ready',
+                body: `Found ${this.row_datas.length} leads for "${this.input}"`,
                 id: notifId,
                 channelId: 'search-updates',
                 smallIcon: 'ic_notification',
                 autoCancel: true,
               }],
             });
-            console.log('[NOTIF] Schedule result:', JSON.stringify(result));
           } catch (notifErr) {
-            console.error('[NOTIF] Failed to send notification:', notifErr);
+            console.error('[NOTIF] Failed:', notifErr);
           }
         }
         if (this.row_datas.length > 0) {
           this.view = 'results';
         } else {
           const toast = await toastController.create({
-            message: 'No results found.', duration: 3000, position: 'bottom', color: 'warning',
+            message: 'No leads found. Try a different search.', duration: 3000, position: 'bottom', color: 'warning',
           });
           await toast.present();
         }
       } catch (error) {
         console.error('Search error:', error);
         const toast = await toastController.create({
-          message: 'Search failed. Please try again.', duration: 3000, position: 'bottom', color: 'danger',
+          message: 'Lead search failed. Please try again.', duration: 3000, position: 'bottom', color: 'danger',
         });
         await toast.present();
       }
@@ -451,13 +527,13 @@ export default {
           this.downloadedUri = result.uri;
         }
         const toast = await toastController.create({
-          message: 'Saved in Downloads', duration: 3000, position: 'bottom', color: 'success',
+          message: 'Leads exported to Downloads', duration: 3000, position: 'bottom', color: 'success',
         });
         await toast.present();
       } catch (error) {
-        console.error('Download error:', error);
+        console.error('Export error:', error);
         const toast = await toastController.create({
-          message: 'Download failed. Try again.', duration: 3000, position: 'bottom', color: 'danger',
+          message: 'Export failed. Try again.', duration: 3000, position: 'bottom', color: 'danger',
         });
         await toast.present();
       }
@@ -466,7 +542,6 @@ export default {
       try {
         await SaveToDownloads.openFile({ uri: this.downloadedUri });
       } catch (error) {
-        console.error('Open file error:', error);
         const toast = await toastController.create({
           message: 'No app found to open .xlsx files', duration: 3000, position: 'bottom', color: 'warning',
         });
@@ -495,30 +570,144 @@ export default {
 </script>
 
 <style scoped>
+/* Header */
 .header-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
 }
-.brand-icon {
-  width: 24px;
-  height: 24px;
+.brand-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: #E8FF00;
+  color: #0F0F0F;
+  font-weight: 900;
+  font-size: 16px;
+  border-radius: 6px;
+}
+.brand-name {
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: -0.3px;
+}
+.brand-accent {
+  color: #E8FF00;
+  font-weight: 400;
 }
 
-/* Search view */
+/* Search hero */
 .content-center {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
   align-items: center;
+  justify-content: center;
   min-height: 80vh;
-  padding: 16px;
+  padding: 24px 16px;
+}
+.search-hero {
+  text-align: center;
+  margin-bottom: 32px;
+}
+.hero-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(232, 255, 0, 0.3);
+  color: #E8FF00;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  margin-bottom: 16px;
+}
+.hero-title {
+  font-size: 28px;
+  font-weight: 800;
+  line-height: 1.2;
+  margin: 0 0 12px;
+  letter-spacing: -0.5px;
+}
+.accent {
+  color: #E8FF00;
+}
+.hero-sub {
+  color: #888;
+  font-size: 14px;
+  line-height: 1.5;
+  max-width: 360px;
+  margin: 0 auto;
 }
 .search-container {
   width: 100%;
   max-width: 600px;
 }
+.leadgen-search {
+  --background: #1A1A1A;
+  --border-radius: 12px;
+  --box-shadow: none;
+  --color: #f0f0f0;
+  --placeholder-color: #666;
+}
 .action-buttons {
   margin-top: 12px;
+}
+.search-btn {
+  --background: #E8FF00;
+  --color: #0F0F0F;
+  --border-radius: 12px;
+  font-weight: 700;
+  font-size: 15px;
+  height: 48px;
+}
+.search-btn:hover {
+  --background: #d4eb00;
+}
+.search-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 20px;
+  justify-content: center;
+}
+.tag {
+  padding: 6px 14px;
+  border-radius: 20px;
+  background: #1A1A1A;
+  color: #888;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.tag:hover {
+  background: #252525;
+  color: #E8FF00;
+}
+
+/* Results toolbar */
+.results-toolbar {
+  --background: #1A1A1A;
+}
+.results-chip {
+  --background: rgba(232, 255, 0, 0.15);
+  --color: #E8FF00;
+  font-weight: 600;
+  font-size: 12px;
+}
+.action-btn {
+  --background: #E8FF00;
+  --color: #0F0F0F;
+  --border-radius: 8px;
+  font-weight: 600;
+  font-size: 13px;
+}
+.share-btn {
+  --background: #333;
+  --color: #f0f0f0;
+  --border-radius: 8px;
+  font-weight: 600;
+  font-size: 13px;
 }
 
 /* Results view */
@@ -530,19 +719,23 @@ export default {
   align-items: center;
   padding: 4px 8px;
   gap: 4px;
-  background: var(--ion-color-light);
+  background: #1A1A1A;
   position: sticky;
   top: 0;
   z-index: 10;
 }
 .filter-search {
   flex: 1;
-  --background: var(--ion-background-color);
+  --background: #252525;
+  --border-radius: 8px;
+  --color: #f0f0f0;
+  --placeholder-color: #666;
   padding: 0 !important;
 }
 .sort-select {
   max-width: 120px;
   font-size: 14px;
+  color: #ccc;
 }
 
 .cards-container {
@@ -551,10 +744,18 @@ export default {
 .data-card {
   margin-bottom: 8px;
   cursor: pointer;
+  --background: #1A1A1A;
+  border-radius: 12px;
+  border: 1px solid #252525;
+  transition: border-color 0.2s;
+}
+.data-card:hover {
+  border-color: #E8FF00;
 }
 .card-title {
   font-size: 16px;
   font-weight: 600;
+  color: #f0f0f0;
 }
 .card-meta {
   display: flex;
@@ -569,11 +770,11 @@ export default {
   font-weight: 600;
 }
 .reviews {
-  color: var(--ion-color-medium);
+  color: #888;
   font-size: 13px;
 }
 .card-address {
-  color: var(--ion-color-medium);
+  color: #888;
   font-size: 13px;
   margin: 4px 0 8px;
 }
@@ -582,11 +783,23 @@ export default {
   flex-wrap: wrap;
   gap: 6px;
 }
+.lead-chip {
+  --background: transparent;
+  font-size: 12px;
+}
+.phone-chip {
+  --color: #E8FF00;
+  border-color: rgba(232, 255, 0, 0.3);
+}
+.web-chip {
+  --color: #888;
+  border-color: #333;
+}
 
 .no-results {
   text-align: center;
   padding: 40px 16px;
-  color: var(--ion-color-medium);
+  color: #666;
 }
 
 .link-text {
@@ -594,22 +807,114 @@ export default {
 }
 
 /* Footer */
-.social-links {
-  display: flex;
-  justify-content: center;
-  gap: 24px;
-  padding: 8px 0;
-}
-.social-links a {
-  color: var(--ion-color-medium);
-  font-size: 24px;
-  transition: opacity 0.2s;
-}
-.social-links a:hover {
-  opacity: 0.7;
-}
 .footer-toolbar {
-  --background: transparent;
+  --background: #0F0F0F;
+  --border-color: #1A1A1A;
+}
+.footer-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 0;
+  font-size: 12px;
+}
+.footer-brand {
+  font-weight: 700;
+  color: #E8FF00;
+}
+.footer-dot {
+  color: #444;
+}
+.footer-text {
+  color: #666;
+  font-style: italic;
+}
+
+/* Info Modal */
+.info-content {
+  --background: #0F0F0F;
+}
+.info-hero {
+  text-align: center;
+  padding: 24px 0 16px;
+}
+.info-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  background: #E8FF00;
+  color: #0F0F0F;
+  font-weight: 900;
+  font-size: 24px;
+  border-radius: 12px;
+  margin-bottom: 12px;
+}
+.info-hero h2 {
+  font-size: 24px;
+  font-weight: 800;
+  margin: 0;
+}
+.info-tagline {
+  color: #888;
+  font-size: 14px;
+  margin: 4px 0 0;
+}
+.info-section {
+  margin-bottom: 24px;
+}
+.info-section h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: #E8FF00;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 12px;
+}
+.info-section p {
+  color: #aaa;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.info-card {
+  background: #1A1A1A;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 8px;
+}
+.info-card strong {
+  color: #f0f0f0;
+  font-size: 15px;
+}
+.info-card p {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+.info-links {
+  background: transparent;
+}
+.info-links ion-item {
+  --background: #1A1A1A;
+  --color: #ccc;
+  --border-radius: 10px;
+  margin-bottom: 6px;
+  --border-color: transparent;
+  font-size: 14px;
+}
+.info-socials {
+  display: flex;
+  gap: 20px;
+  justify-content: center;
+}
+.info-socials a {
+  color: #888;
+  font-size: 28px;
+  transition: color 0.2s;
+}
+.info-socials a:hover {
+  color: #E8FF00;
 }
 
 .shake {

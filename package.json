@@ -1,5 +1,5 @@
 {
-  "name": "ionic-app-base",
+  "name": "mergex-leadgen",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -13,7 +13,7 @@
     "run:ios": "vite build && npx cap sync ios && npx cap run ios",
     "export:android": "vite build && npx cap sync android && cd android && ./gradlew assembleDebug && echo 'APK at: android/app/build/outputs/apk/debug/app-debug.apk'",
     "export:android:release": "vite build && npx cap sync android && cd android && ./gradlew assembleRelease && echo 'APK at: android/app/build/outputs/apk/release/app-release-unsigned.apk'",
-    "sign:android": "cd android && KEYSTORE=../release.keystore && ALIGNED=app/build/outputs/apk/release/app-release-aligned.apk && SIGNED=app/build/outputs/apk/release/app-release-signed.apk && zipalign -f -p 4 app/build/outputs/apk/release/app-release-unsigned.apk $ALIGNED && apksigner sign --ks $KEYSTORE --ks-key-alias globexdata --out $SIGNED $ALIGNED && apksigner verify $SIGNED && echo 'Signed APK at: android/app/build/outputs/apk/release/app-release-signed.apk'",
+    "sign:android": "cd android && KEYSTORE=../release.keystore && ALIGNED=app/build/outputs/apk/release/app-release-aligned.apk && SIGNED=app/build/outputs/apk/release/app-release-signed.apk && zipalign -f -p 4 app/build/outputs/apk/release/app-release-unsigned.apk $ALIGNED && apksigner sign --ks $KEYSTORE --ks-key-alias mergex-leadgen --out $SIGNED $ALIGNED && apksigner verify $SIGNED && echo 'Signed APK at: android/app/build/outputs/apk/release/app-release-signed.apk'",
     "export:ios": "vite build && npx cap sync ios && npx cap open ios",
     "test:e2e": "cypress run",
     "test:unit": "vitest",
