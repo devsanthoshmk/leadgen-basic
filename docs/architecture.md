@@ -70,7 +70,7 @@ App.vue
 └── ion-router-outlet
     └── HomePage.vue (single page app)
         ├── Search View
-        │   ├── Header ("Globex Places Data" branding)
+        │   ├── Header ("Mergex LeadGen" branding)
         │   ├── Search input + button
         │   └── Footer (social links)
         │

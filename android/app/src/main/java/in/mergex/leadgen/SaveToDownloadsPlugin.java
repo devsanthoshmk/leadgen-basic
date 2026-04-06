@@ -1,4 +1,4 @@
-package com.globexdata.places;
+package in.mergex.leadgen;
 
 import android.content.ContentValues;
 import android.content.Intent;

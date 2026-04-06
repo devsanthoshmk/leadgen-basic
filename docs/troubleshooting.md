@@ -20,7 +20,7 @@
 
 2. **Check permissions:** Look for `[NOTIF]` log lines in Android Studio Logcat. Filter by your app package.
 
-3. **Notification channel exists:** The app creates a "Search Updates" channel on startup. Check Settings → Apps → GlobexData → Notifications.
+3. **Notification channel exists:** The app creates a "Search Updates" channel on startup. Check Settings → Apps → Mergex LeadGen → Notifications.
 
 4. **Android 13+:** `POST_NOTIFICATIONS` permission must be granted at runtime. The app requests this on startup.
 
@@ -44,7 +44,7 @@
 
 ### Android: File Not Found in Downloads
 
-- Check app has storage permissions (Settings → Apps → GlobexData → Permissions)
+- Check app has storage permissions (Settings → Apps → Mergex LeadGen → Permissions)
 - On Android 11+, files are saved via scoped storage — check the Downloads folder specifically
 
 ### Web: Download Doesn't Start

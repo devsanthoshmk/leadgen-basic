@@ -1,4 +1,4 @@
-# GlobexData Release Workflow
+# Mergex-LeadGen Release Workflow
 # ===========================
 # Builds Android APK and creates a GitHub Release when you push a tag.
 #
@@ -189,7 +189,7 @@ jobs:
           echo "✅ APK found ($APK_TYPE): $APK_PATH ($APK_SIZE)"
           echo "apk_path=ionic-app/$APK_PATH" >> "$GITHUB_OUTPUT"
           echo "apk_type=$APK_TYPE" >> "$GITHUB_OUTPUT"
-          echo "apk_name=GlobexData-$(echo ${{ github.ref_name || inputs.tag_name }})-$APK_TYPE.apk" >> "$GITHUB_OUTPUT"
+          echo "apk_name=Mergex-LeadGen-$(echo ${{ github.ref_name || inputs.tag_name }})-$APK_TYPE.apk" >> "$GITHUB_OUTPUT"
 
       - name: Cleanup signing material
         if: always() && steps.signing.outputs.signing_enabled == 'true'
@@ -238,7 +238,7 @@ jobs:
         run: |
           mkdir -p release-assets
           APK=$(find artifacts/android -name '*.apk' | head -1)
-          cp "$APK" "release-assets/GlobexData-${{ steps.tag.outputs.tag }}.apk"
+          cp "$APK" "release-assets/Mergex-LeadGen-${{ steps.tag.outputs.tag }}.apk"
           echo "📦 Release assets:"
           ls -lh release-assets/
 
@@ -246,18 +246,18 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          name: "GlobexData ${{ steps.tag.outputs.tag }}"
+          name: "Mergex-LeadGen ${{ steps.tag.outputs.tag }}"
           body: |
-            ## GlobexData ${{ steps.tag.outputs.tag }}
+            ## Mergex-LeadGen ${{ steps.tag.outputs.tag }}
 
             ### Downloads
             - **Android APK** — ${{ needs.build-android.outputs.apk_type == 'signed-release' && 'Signed release build (recommended)' || 'Debug fallback build (installable, but not for production distribution)' }}
 
             ### What's included
-            - Google Places data scraper
-            - Excel export (.xlsx)
+            - Lead generation from Google Maps data
+            - Excel export (.xlsx) for sales pipelines
             - Background search with notifications
-            - Filter, sort, and detail view for results
+            - Filter, sort, and detailed lead view
 
             ---
             Built from commit: ${{ github.sha }}

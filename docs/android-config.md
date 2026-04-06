@@ -4,8 +4,8 @@
 
 | Property | Value |
 |----------|-------|
-| App ID | `com.globexdata.places` |
-| App Name | GlobexData |
+| App ID | `in.mergex.leadgen` |
+| App Name | Mergex LeadGen |
 | Min SDK | Default (Capacitor 8 sets API 22) |
 | Target SDK | Default (Capacitor 8 sets latest) |
 
@@ -88,7 +88,7 @@ Uses `@capawesome-team/capacitor-android-foreground-service` to keep scraping al
 ```javascript
 await ForegroundService.startForegroundService({
   id: 1,
-  title: 'GlobexData',
+  title: 'Mergex LeadGen',
   body: 'Searching for places data...',
   smallIcon: 'ic_notification',
 });
@@ -102,8 +102,8 @@ Automatically stopped when search completes or fails.
 
 ```typescript
 {
-  appId: 'com.globexdata.places',
-  appName: 'GlobexData',
+  appId: 'in.mergex.leadgen',
+  appName: 'Mergex LeadGen',
   webDir: 'dist',
   plugins: {
     CapacitorHttp: { enabled: true },

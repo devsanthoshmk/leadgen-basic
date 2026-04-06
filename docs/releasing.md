@@ -90,7 +90,7 @@ git push origin v1.1.0
 
 1. Go to your GitHub repo
 2. Click **Releases** (right sidebar or Code tab)
-3. The latest release will have `GlobexData-v1.1.0.apk` attached
+3. The latest release will have `Mergex LeadGen-v1.1.0.apk` attached
 4. Download and install on Android
 
 ---
@@ -178,7 +178,7 @@ Job 1: build-android
         ▼
 Job 2: release
   ├── Download APK artifact
-  ├── Rename to GlobexData-v1.0.0.apk
+  ├── Rename to Mergex LeadGen-v1.0.0.apk
   └── Create GitHub Release with APK attached
 ```
 
@@ -199,7 +199,7 @@ To enable signed releases, add these secrets in **GitHub → Settings → Secret
 
 ### Generate a keystore
 ```bash
-keytool -genkey -v -keystore release.keystore -alias globexdata -keyalg RSA -keysize 2048 -validity 10000
+keytool -genkey -v -keystore release.keystore -alias mergex-leadgen -keyalg RSA -keysize 2048 -validity 10000
 ```
 
 ### Convert to base64 for GitHub secret

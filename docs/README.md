@@ -1,4 +1,4 @@
-# GlobexData - Places Data App
+# Mergex LeadGen - Places Data App
 
 A cross-platform mobile and web application that scrapes Google Places data and exports it to Excel. Built with Ionic Vue + Capacitor.
 
@@ -34,7 +34,7 @@ npm run export:android
 
 ## App Overview
 
-**GlobexData** lets users search for businesses/places, view detailed results with filtering and sorting, and export the data to Excel spreadsheets.
+**Mergex LeadGen** lets users search for businesses/places, view detailed results with filtering and sorting, and export the data to Excel spreadsheets.
 
 ### How It Works
 

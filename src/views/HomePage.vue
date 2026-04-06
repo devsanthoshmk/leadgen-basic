@@ -261,6 +261,20 @@
           </div>
 
           <div class="info-section">
+            <h3>Built On</h3>
+            <div class="info-card">
+              <strong>GlobexData — Places Data App</strong>
+              <p>This app is built on top of the open-source GlobexData project.</p>
+            </div>
+            <ion-list class="info-links">
+              <ion-item button @click="openUrl('https://github.com/devsanthoshmk/places-data-app')">
+                <ion-icon :icon="logoGithub" slot="start"></ion-icon>
+                <ion-label>Source — places-data-app</ion-label>
+              </ion-item>
+            </ion-list>
+          </div>
+
+          <div class="info-section">
             <h3>Developer</h3>
             <ion-list class="info-links">
               <ion-item button @click="openUrl('https://github.com/devsanthoshmk')">

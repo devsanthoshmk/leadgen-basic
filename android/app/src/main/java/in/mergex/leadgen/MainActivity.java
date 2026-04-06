@@ -1,4 +1,4 @@
-package com.globexdata.places;
+package in.mergex.leadgen;
 
 import android.os.Bundle;
 import com.getcapacitor.BridgeActivity;

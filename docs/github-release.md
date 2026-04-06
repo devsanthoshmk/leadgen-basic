@@ -49,7 +49,7 @@ Go to your repo's **Actions** tab to watch the build progress. It typically take
 ### Step 5: Check the release
 
 Once complete, go to **Releases** in your repo. You'll find:
-- `GlobexData-v1.1.0.apk` — ready to download and install on Android
+- `Mergex LeadGen-v1.1.0.apk` — ready to download and install on Android
 
 ## Tag Format
 
@@ -90,7 +90,7 @@ Job 1: build-android (ubuntu-latest)
     ▼
 Job 2: release (ubuntu-latest)
     ├── Download APK artifact
-    ├── Rename to GlobexData-v1.0.0.apk
+    ├── Rename to Mergex LeadGen-v1.0.0.apk
     └── Create GitHub Release with APK attached
 ```
 
