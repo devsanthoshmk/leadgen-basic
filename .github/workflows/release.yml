@@ -34,7 +34,7 @@ env:
   NODE_VERSION: '22'
   JAVA_VERSION: '21'
   JAVA_DISTRIBUTION: 'temurin'
-  WORKING_DIR: 'ionic-app'
+  WORKING_DIR: '.'
 
 jobs:
   # ─────────────────────────────────────────────
@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ionic-app
+        working-directory: .
 
     outputs:
       apk_path: ${{ steps.find_apk.outputs.apk_path }}
@@ -115,7 +115,7 @@ jobs:
           fi
 
       - name: Build APK (signed release or debug fallback)
-        working-directory: ionic-app/android
+        working-directory: android
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
@@ -185,7 +185,7 @@ jobs:
           fi
           APK_SIZE=$(du -h "$APK_PATH" | cut -f1)
           echo "✅ APK found ($APK_TYPE): $APK_PATH ($APK_SIZE)"
-          echo "apk_path=ionic-app/$APK_PATH" >> "$GITHUB_OUTPUT"
+          echo "apk_path=$APK_PATH" >> "$GITHUB_OUTPUT"
           echo "apk_type=$APK_TYPE" >> "$GITHUB_OUTPUT"
           echo "apk_name=Mergex-LeadGen-$(echo ${{ github.ref_name || inputs.tag_name }})-$APK_TYPE.apk" >> "$GITHUB_OUTPUT"
 
