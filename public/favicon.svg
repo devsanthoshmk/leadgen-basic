@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background circle -->
+  <circle cx="256" cy="256" r="256" fill="#1A73E8"/>
+
+  <!-- Location Pin -->
+  <path d="M256 80C201.5 80 157 124.5 157 179C157 252 256 400 256 400S355 252 355 179C355 124.5 310.5 80 256 80Z" fill="#FFFFFF"/>
+
+  <!-- Magnifying glass circle -->
+  <path d="M240 130C206.9 130 180 156.9 180 190C180 223.1 206.9 250 240 250C253.8 250 266.4 245.1 276.2 237L276.2 237L309.5 270.3L320 259.8L286.7 226.5C294.9 216.6 300 204 300 190C300 156.9 273.1 130 240 130Z" fill="#1A73E8"/>
+
+  <!-- Magnifying glass inner white -->
+  <path d="M240 150C218 150 200 168 200 190C200 212 218 230 240 230C262 230 280 212 280 190C280 168 262 150 240 150Z" fill="#FFFFFF"/>
+
+  <!-- Data bars -->
+  <rect x="222" y="195" width="10" height="22" rx="2" fill="#1A73E8"/>
+  <rect x="237" y="182" width="10" height="35" rx="2" fill="#1A73E8"/>
+  <rect x="252" y="190" width="10" height="27" rx="2" fill="#1A73E8"/>
+</svg>

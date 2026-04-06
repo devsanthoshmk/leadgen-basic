@@ -1,0 +1,267 @@
+# GlobexData Release Workflow
+# ===========================
+# Builds Android APK and creates a GitHub Release when you push a tag.
+#
+# HOW TO USE:
+#   1. Update version in package.json and android/app/build.gradle
+#   2. Commit your changes
+#   3. Create and push a tag:
+#        git tag v1.0.0
+#        git push origin v1.0.0
+#   4. The workflow runs automatically and creates a GitHub Release with the APK
+#
+# TAG FORMAT: Must start with 'v' (e.g., v1.0.0, v1.2.3-beta)
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+  # Allow manual trigger from GitHub Actions tab
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release tag (e.g., v1.0.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: '22'
+  JAVA_VERSION: '21'
+  JAVA_DISTRIBUTION: 'temurin'
+  WORKING_DIR: 'ionic-app'
+
+jobs:
+  # ─────────────────────────────────────────────
+  # Job 1: Build Android APK
+  # ─────────────────────────────────────────────
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ionic-app
+
+    outputs:
+      apk_path: ${{ steps.find_apk.outputs.apk_path }}
+      apk_name: ${{ steps.find_apk.outputs.apk_name }}
+      apk_type: ${{ steps.find_apk.outputs.apk_type }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: ionic-app/package-lock.json
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: |
+          echo "::group::npm install"
+          npm ci
+          echo "::endgroup::"
+          echo "✅ Dependencies installed"
+
+      - name: Build web assets
+        run: |
+          echo "::group::vite build"
+          npx vite build
+          echo "::endgroup::"
+          echo "✅ Web build complete"
+          echo "::group::dist contents"
+          ls -lh dist/
+          echo "::endgroup::"
+
+      - name: Sync Capacitor to Android
+        run: |
+          echo "::group::cap sync"
+          npx cap sync android
+          echo "::endgroup::"
+          echo "✅ Capacitor sync complete"
+
+      - name: Prepare Android signing material
+        id: signing
+        working-directory: .
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ] && [ -n "$ANDROID_KEY_ALIAS" ] && [ -n "$ANDROID_KEY_PASSWORD" ]; then
+            KEYSTORE_PATH="$RUNNER_TEMP/release.keystore"
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
+            echo "signing_enabled=true" >> "$GITHUB_OUTPUT"
+            echo "keystore_path=$KEYSTORE_PATH" >> "$GITHUB_OUTPUT"
+            echo "✅ Release signing is enabled"
+          else
+            echo "signing_enabled=false" >> "$GITHUB_OUTPUT"
+            echo "⚠️ Release signing secrets not found, workflow will publish a debug APK fallback"
+          fi
+
+      - name: Build APK (signed release or debug fallback)
+        working-directory: ionic-app/android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEYSTORE_PATH: ${{ steps.signing.outputs.keystore_path }}
+        run: |
+          chmod +x gradlew
+          if [ "${{ steps.signing.outputs.signing_enabled }}" = "true" ]; then
+            echo "::group::gradle assembleRelease"
+            ./gradlew assembleRelease --no-daemon --stacktrace 2>&1
+            echo "::endgroup::"
+
+            UNSIGNED_APK="app/build/outputs/apk/release/app-release-unsigned.apk"
+            if [ ! -f "$UNSIGNED_APK" ]; then
+              echo "❌ ERROR: Expected unsigned release APK not found at $UNSIGNED_APK"
+              exit 1
+            fi
+
+            LATEST_BUILD_TOOLS=$(ls -1 "$ANDROID_HOME/build-tools" 2>/dev/null | sort -V | tail -n 1)
+            if [ -z "$LATEST_BUILD_TOOLS" ]; then
+              echo "❌ ERROR: Android build-tools not found in $ANDROID_HOME/build-tools"
+              exit 1
+            fi
+            BUILD_TOOLS_DIR="$ANDROID_HOME/build-tools/$LATEST_BUILD_TOOLS"
+            if [ ! -x "$BUILD_TOOLS_DIR/zipalign" ] || [ ! -x "$BUILD_TOOLS_DIR/apksigner" ]; then
+              echo "❌ ERROR: Required tools not found in $BUILD_TOOLS_DIR"
+              exit 1
+            fi
+            ALIGNED_APK="app/build/outputs/apk/release/app-release-aligned.apk"
+            SIGNED_APK="app/build/outputs/apk/release/app-release.apk"
+
+            "$BUILD_TOOLS_DIR/zipalign" -f -p 4 "$UNSIGNED_APK" "$ALIGNED_APK"
+            "$BUILD_TOOLS_DIR/apksigner" sign \
+              --ks "$KEYSTORE_PATH" \
+              --ks-key-alias "$ANDROID_KEY_ALIAS" \
+              --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
+              --key-pass "pass:$ANDROID_KEY_PASSWORD" \
+              --out "$SIGNED_APK" \
+              "$ALIGNED_APK"
+            "$BUILD_TOOLS_DIR/apksigner" verify "$SIGNED_APK"
+            echo "✅ Signed release APK build complete"
+          else
+            echo "::group::gradle assembleDebug"
+            ./gradlew assembleDebug --no-daemon --stacktrace 2>&1
+            echo "::endgroup::"
+            echo "✅ Debug APK build complete"
+          fi
+
+      - name: Locate APK
+        id: find_apk
+        run: |
+          APK_PATH=""
+          APK_TYPE=""
+
+          if [ "${{ steps.signing.outputs.signing_enabled }}" = "true" ] && [ -f "android/app/build/outputs/apk/release/app-release.apk" ]; then
+            APK_PATH="android/app/build/outputs/apk/release/app-release.apk"
+            APK_TYPE="signed-release"
+          elif [ -f "android/app/build/outputs/apk/debug/app-debug.apk" ]; then
+            APK_PATH="android/app/build/outputs/apk/debug/app-debug.apk"
+            APK_TYPE="debug-fallback"
+          fi
+
+          if [ -z "$APK_PATH" ]; then
+            echo "❌ ERROR: No APK found in expected output folders"
+            find android/app/build/outputs/ -name '*.apk' 2>/dev/null || echo "No APK files found anywhere"
+            exit 1
+          fi
+          APK_SIZE=$(du -h "$APK_PATH" | cut -f1)
+          echo "✅ APK found ($APK_TYPE): $APK_PATH ($APK_SIZE)"
+          echo "apk_path=ionic-app/$APK_PATH" >> "$GITHUB_OUTPUT"
+          echo "apk_type=$APK_TYPE" >> "$GITHUB_OUTPUT"
+          echo "apk_name=GlobexData-$(echo ${{ github.ref_name || inputs.tag_name }})-$APK_TYPE.apk" >> "$GITHUB_OUTPUT"
+
+      - name: Cleanup signing material
+        if: always() && steps.signing.outputs.signing_enabled == 'true'
+        run: |
+          if [ -n "${{ steps.signing.outputs.keystore_path }}" ]; then
+            rm -f "${{ steps.signing.outputs.keystore_path }}"
+            echo "✅ Removed temporary keystore file"
+          fi
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: ${{ steps.find_apk.outputs.apk_path }}
+          retention-days: 5
+
+  # ─────────────────────────────────────────────
+  # Job 2: Create GitHub Release
+  # ─────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [build-android]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Android APK
+        uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+          path: artifacts/android
+
+      - name: Determine tag name
+        id: tag
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [ -z "$TAG" ] || [ "$TAG" = "" ]; then
+            TAG="${{ inputs.tag_name }}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "📌 Release tag: $TAG"
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          APK=$(find artifacts/android -name '*.apk' | head -1)
+          cp "$APK" "release-assets/GlobexData-${{ steps.tag.outputs.tag }}.apk"
+          echo "📦 Release assets:"
+          ls -lh release-assets/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "GlobexData ${{ steps.tag.outputs.tag }}"
+          body: |
+            ## GlobexData ${{ steps.tag.outputs.tag }}
+
+            ### Downloads
+            - **Android APK** — ${{ needs.build-android.outputs.apk_type == 'signed-release' && 'Signed release build (recommended)' || 'Debug fallback build (installable, but not for production distribution)' }}
+
+            ### What's included
+            - Google Places data scraper
+            - Excel export (.xlsx)
+            - Background search with notifications
+            - Filter, sort, and detail view for results
+
+            ---
+            Built from commit: ${{ github.sha }}
+          files: release-assets/*
+          draft: false
+          prerelease: ${{ contains(steps.tag.outputs.tag, 'beta') || contains(steps.tag.outputs.tag, 'alpha') || contains(steps.tag.outputs.tag, 'rc') }}
+          generate_release_notes: true
