@@ -66,7 +66,7 @@
           </div>
         </div>
         <div class="search-tags">
-          <span class="tag" @click="input = 'Hotels in Bangalore'; doSearch()">Hotels in Bangalore</span>
+          <span class="tag" @click="input = 'restaurants in Bangalore'; doSearch()">Restaurants in Bangalore</span>
           <span class="tag" @click="input = 'Cafes in Mumbai'; doSearch()">Cafes in Mumbai</span>
           <span class="tag" @click="input = 'Gyms in Hyderabad'; doSearch()">Gyms in Hyderabad</span>
         </div>

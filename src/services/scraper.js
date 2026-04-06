@@ -1,20 +1,14 @@
-import { parsePhoneNumberFromString } from 'libphonenumber-js';
-
 export function extractPhone(text) {
   if (!text) return '';
-  
+
   const phoneRegex = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{1,4}\)?[-.\s]?\d{1,4}[-.\s]?\d{1,9}/g;
   const matches = text.match(phoneRegex);
-  
+
   if (!matches) return '';
 
   for (const match of matches) {
     if (match.replace(/\D/g, '').length < 8) continue;
-
-    const phoneNumber = parsePhoneNumberFromString(match, 'JP'); // Fallback region
-    if (phoneNumber && phoneNumber.isValid()) {
-      return phoneNumber.number;
-    }
+    return match.trim();
   }
   return '';
 }
