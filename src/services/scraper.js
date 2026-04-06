@@ -347,12 +347,19 @@ async function fetchit(url) {
  *   - "long"   : Fetches extra details for every result.
  * @returns {Promise<Array<Object>>} Array of business listing objects.
  */
-export async function search(query, mode = 'normal') {
+export async function search(query, mode = 'normal', onProgress = null) {
   const fullList = [];
   let pagination = 0;
+  let pageNum = 0;
 
   // Phase 1: Main Search Loop
   while (true) {
+    pageNum++;
+    if (onProgress) {
+      const cont = onProgress({ phase: 'search', page: pageNum, found: fullList.length, message: `Searching page ${pageNum}...` });
+      if (cont === false) return fullList;
+    }
+
     const url = new URL('https://www.google.com/search');
     url.search = new URLSearchParams({
       q: query,
@@ -373,12 +380,21 @@ export async function search(query, mode = 'normal') {
   // Deduplicate before doing intensive sub-fetches
   const uniqueResults = Array.from(new Map(fullList.map(item => [item.cid || (item.title + item.address), item])).values());
 
+  if (onProgress) {
+    onProgress({ phase: 'search-done', found: uniqueResults.length, message: `Found ${uniqueResults.length} leads` });
+  }
+
   // Fast mode: return immediately with what we have
   if (mode === 'fast') {
     return uniqueResults;
   }
 
   // Phase 2: Extra detail fetches via CID
+  let enriched = 0;
+  const toEnrich = uniqueResults.filter(item => {
+    return mode === 'long' ? !!item.cid : !item.completePhoneNumber && !!item.cid;
+  });
+
   for (const item of uniqueResults) {
     // normal: only fetch for items missing a phone number
     // long:   fetch for every item that has a CID
@@ -388,6 +404,12 @@ export async function search(query, mode = 'normal') {
         : !item.completePhoneNumber && !!item.cid;
 
     if (!shouldFetch) continue;
+
+    enriched++;
+    if (onProgress) {
+      const cont = onProgress({ phase: 'enrich', current: enriched, total: toEnrich.length, message: `Enriching ${enriched}/${toEnrich.length} leads...` });
+      if (cont === false) return uniqueResults;
+    }
 
     console.log(`[${mode}] Fetching details for "${item.title}" (CID: ${item.cid})...`);
 

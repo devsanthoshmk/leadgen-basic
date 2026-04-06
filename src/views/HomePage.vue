@@ -61,7 +61,7 @@
           <div class="action-buttons">
             <ion-button :disabled="searching" @click="doSearch" expand="block" class="search-btn">
               <ion-spinner v-if="searching" name="crescent" slot="start"></ion-spinner>
-              {{ searching ? 'Finding leads...' : 'Generate Leads' }}
+              {{ searching ? (progressText || 'Finding leads...') : 'Generate Leads' }}
             </ion-button>
           </div>
         </div>
@@ -358,6 +358,8 @@ export default {
       detailRow: null,
       infoOpen: false,
       notificationsGranted: false,
+      searchCancelled: false,
+      progressText: '',
       // icons
       logoGithub, logoLinkedin, logoInstagram, logoTwitter, shareSocialOutline,
       downloadOutline, arrowBackOutline,
@@ -518,16 +520,55 @@ export default {
         await ForegroundService.startForegroundService({
           id: 1001,
           title: 'Mergex LeadGen',
-          body: 'Finding leads for your sales pipeline...',
+          body: 'Starting lead search...',
           smallIcon: 'ic_stat_icon_config_sample',
+          buttons: [{ title: 'Cancel', id: 1 }],
+        });
+        await ForegroundService.addListener('buttonClicked', (event) => {
+          if (event.buttonId === 1) {
+            this.searchCancelled = true;
+          }
         });
       } catch (e) {
         console.warn('Could not start foreground service:', e);
       }
     },
+    async updateForegroundNotification(body) {
+      if (!ForegroundService) return;
+      try {
+        await ForegroundService.updateForegroundService({
+          id: 1001,
+          title: 'Mergex LeadGen',
+          body,
+          smallIcon: 'ic_stat_icon_config_sample',
+        });
+      } catch (e) { /* ignore */ }
+    },
     async stopForegroundService() {
       if (!ForegroundService) return;
-      try { await ForegroundService.stopForegroundService(); } catch (e) { /* ignore */ }
+      try {
+        await ForegroundService.removeAllListeners();
+        await ForegroundService.stopForegroundService();
+      } catch (e) { /* ignore */ }
+    },
+    async showBatteryOptimizationHint() {
+      if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') return;
+      if (localStorage.getItem('battery_hint_shown')) return;
+      localStorage.setItem('battery_hint_shown', '1');
+      const alert = await alertController.create({
+        header: 'Keep App Running',
+        message: 'Some devices may stop background tasks to save battery. If scraping stops unexpectedly, go to Settings > Battery > Mergex LeadGen and disable battery optimization.',
+        buttons: [
+          { text: 'Got it', role: 'cancel' },
+          {
+            text: 'Open Settings',
+            handler: () => {
+              try { App.openUrl({ url: 'android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS' }); } catch (e) { /* ignore */ }
+            },
+          },
+        ],
+      });
+      await alert.present();
     },
     newSearch() {
       this.view = 'search';
@@ -543,8 +584,12 @@ export default {
         return;
       }
       this.searching = true;
+      this.searchCancelled = false;
+      this.progressText = 'Starting search...';
       this.showShare = false;
       this.downloadedUri = null;
+
+      await this.showBatteryOptimizationHint();
       await this.startForegroundService();
 
       if (Capacitor.isNativePlatform()) {
@@ -556,8 +601,21 @@ export default {
       }
 
       try {
-        this.row_datas = await search(this.input);
-        if (Capacitor.isNativePlatform() && this.notificationsGranted) {
+        const onProgress = (info) => {
+          this.progressText = info.message;
+          this.updateForegroundNotification(info.message);
+          if (this.searchCancelled) return false;
+        };
+
+        this.row_datas = await search(this.input, 'normal', onProgress);
+
+        if (this.searchCancelled) {
+          const toast = await toastController.create({
+            message: `Search cancelled. Found ${this.row_datas.length} leads so far.`, duration: 3000, position: 'bottom', color: 'warning',
+          });
+          await toast.present();
+          if (this.row_datas.length > 0) this.view = 'results';
+        } else if (Capacitor.isNativePlatform() && this.notificationsGranted) {
           try {
             const notifId = Math.floor(Math.random() * 2147483646) + 1;
             await LocalNotifications.schedule({
@@ -574,13 +632,16 @@ export default {
             console.error('[NOTIF] Failed:', notifErr);
           }
         }
-        if (this.row_datas.length > 0) {
-          this.view = 'results';
-        } else {
-          const toast = await toastController.create({
-            message: 'No leads found. Try a different search.', duration: 3000, position: 'bottom', color: 'warning',
-          });
-          await toast.present();
+
+        if (!this.searchCancelled) {
+          if (this.row_datas.length > 0) {
+            this.view = 'results';
+          } else {
+            const toast = await toastController.create({
+              message: 'No leads found. Try a different search.', duration: 3000, position: 'bottom', color: 'warning',
+            });
+            await toast.present();
+          }
         }
       } catch (error) {
         console.error('Search error:', error);
@@ -588,10 +649,11 @@ export default {
           message: 'Lead search failed. Please try again.', duration: 3000, position: 'bottom', color: 'danger',
         });
         await toast.present();
+      } finally {
+        this.searching = false;
+        this.progressText = '';
+        await this.stopForegroundService();
       }
-
-      this.searching = false;
-      await this.stopForegroundService();
     },
     async downloadExcel() {
       try {
