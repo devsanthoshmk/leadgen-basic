@@ -1,75 +1,3 @@
-/**
- * @module scraper
- * @description Google Local Search scraper that extracts business listings
- * including title, address, phone, website, ratings, and category.
- *
- * ## Search Modes
- *
- * | Mode     | Speed  | Data Completeness | Description                                      |
- * |----------|--------|-------------------|--------------------------------------------------|
- * | "fast"   | Fastest| Basic only        | Scrapes search pages only. Skips phone fallback.  |
- * | "normal" | Medium | Good              | Default. Fetches missing phones via CID lookup.   |
- * | "long"   | Slowest| Maximum           | Fetches extra details for ALL results (full       |
- * |          |        |                   | address, phone, hours, etc.)                      |
- *
- * ## Usage
- *
- * ```js
- * import { search } from './services/scraper.js';
- *
- * // Fast mode - quick results, may miss some phone numbers
- * const fast = await search('restaurants in Chennai', 'fast');
- *
- * // Normal mode (default) - fills in missing phones
- * const normal = await search('restaurants in Chennai');
- *
- * // Long mode - enriches every result with full details
- * const detailed = await search('restaurants in Chennai', 'long');
- * ```
- *
- * ## Return Shape
- *
- * Each item in the returned array:
- * ```
- * {
- *   title: string,
- *   cid: string,
- *   stars: number,
- *   reviews: number,
- *   category: string,
- *   address: string,
- *   completePhoneNumber: string,
- *   url: string
- * }
- * ```
- */
-
-/**
- * Dynamically imports jsdom only in Node.js, hidden from Vite's static analysis.
- */
-async function getJSDOM() {
-  // Use indirect eval so Vite cannot statically resolve this import
-  const mod = await new Function('return import("jsdom")')();
-  return mod.JSDOM;
-}
-
-/**
- * Parses an HTML string into a Document, using native DOMParser in browser
- * or jsdom in Node.js.
- */
-async function parseHTML(html) {
-  if (typeof DOMParser !== 'undefined') {
-    return new DOMParser().parseFromString(html, 'text/html');
-  }
-  const JSDOM = await getJSDOM();
-  return new JSDOM(html).window.document;
-}
-
-/**
- * Extracts a phone number (8+ digits) from a text string.
- * @param {string} text - Raw text that may contain a phone number.
- * @returns {string} The first valid phone number found, or empty string.
- */
 export function extractPhone(text) {
   if (!text) return '';
 
@@ -95,7 +23,19 @@ export function extractPhone(text) {
 export async function extractContactInfoBulletproof(rawPayload) {
   let document;
 
-  document = await parseHTML(rawPayload);
+  // 1. Setup the DOM environment dynamically
+  if (typeof window !== 'undefined' && window.DOMParser) {
+    const parser = new window.DOMParser();
+    document = parser.parseFromString(rawPayload, 'text/html');
+  } else {
+    try {
+      const { JSDOM } = await import('jsdom');
+      const dom = new JSDOM(rawPayload);
+      document = dom.window.document;
+    } catch (err) {
+      throw new Error("In Node.js, you must install 'jsdom': npm install jsdom");
+    }
+  }
 
   const result = {
     address: null,
@@ -215,10 +155,16 @@ async function fetchit(url) {
     }
 
     const htmlText = await response.text();
-    const doc = await parseHTML(htmlText);
+    let parser;
+    if (typeof DOMParser !== 'undefined') {
+      parser = new DOMParser();
+    } else {
+      const { JSDOM } = await import('jsdom');
+      parser = new (new JSDOM()).window.DOMParser();
+    }
+    const doc = parser.parseFromString(htmlText, 'text/html');
 
-    const searchEl = doc.querySelector('#search');
-    const items = searchEl ? searchEl.querySelectorAll('.VkpGBb') : null;
+    const items = doc.querySelector('#search')?.querySelectorAll('.VkpGBb');
     if (!items) return []; 
     
     const scrapedData = [];
@@ -273,12 +219,11 @@ async function fetchit(url) {
       // --- 2. WEBSITE EXTRACTION ---
       const websiteLink = allLinks.find(a => {
         const linkText = a.textContent.toLowerCase();
-        const href = a.getAttribute('href') || '';
-        return linkText.includes('website') && href.startsWith('http');
+        return linkText.includes('website') && a.hasAttribute('href') && a.href.startsWith('http');
       });
 
       if (websiteLink) {
-        row.url = websiteLink.getAttribute('href');
+        row.url = websiteLink.href;
       }
 
       // --- 3. TEXT PARSING ---
@@ -337,17 +282,7 @@ async function fetchit(url) {
   }
 }
 
-/**
- * Searches Google Local listings and returns structured business data.
- *
- * @param {string} query - The search query (e.g. "plumbers in Mumbai").
- * @param {"fast"|"normal"|"long"} [mode="normal"] - Controls speed vs completeness.
- *   - "fast"   : Search pages only, no extra fetches.
- *   - "normal" : Fetches missing phone numbers via CID lookup.
- *   - "long"   : Fetches extra details for every result.
- * @returns {Promise<Array<Object>>} Array of business listing objects.
- */
-export async function search(query, mode = 'normal') {
+export async function search(query) {
   const fullList = [];
   let pagination = 0;
 
@@ -359,7 +294,7 @@ export async function search(query, mode = 'normal') {
       start: pagination,
       udm: '1',
     }).toString();
-    console.log(`[${mode}] Fetching Search Page: ${url}`);
+    console.log(`Fetching Search Page: ${url}`);
 
     const result = await fetchit(url.toString());
     if (result?.length > 0) {
@@ -373,42 +308,34 @@ export async function search(query, mode = 'normal') {
   // Deduplicate before doing intensive sub-fetches
   const uniqueResults = Array.from(new Map(fullList.map(item => [item.cid || (item.title + item.address), item])).values());
 
-  // Fast mode: return immediately with what we have
-  if (mode === 'fast') {
-    return uniqueResults;
-  }
+  // for (const item of uniqueResults) {
+  //   delete item.completePhoneNumber;  
+  // }
 
-  // Phase 2: Extra detail fetches via CID
+  // Phase 2: Missing Phone Number Fallback
   for (const item of uniqueResults) {
-    // normal: only fetch for items missing a phone number
-    // long:   fetch for every item that has a CID
-    const shouldFetch =
-      mode === 'long'
-        ? !!item.cid
-        : !item.completePhoneNumber && !!item.cid;
+    if (!item.completePhoneNumber && item.cid) {
+      console.log(`Missing phone for "${item.title}". Fetching details via CID: ${item.cid}...`);
+      
+      const rawPayload = await fetchExtraDetails(query, item.cid);
 
-    if (!shouldFetch) continue;
-
-    console.log(`[${mode}] Fetching details for "${item.title}" (CID: ${item.cid})...`);
-
-    const rawPayload = await fetchExtraDetails(query, item.cid);
-    if (!rawPayload) continue;
-
-    try {
-      const extraInfo = await extractContactInfoBulletproof(rawPayload);
-
-      if (extraInfo.phoneNumbers && extraInfo.phoneNumbers.length > 0) {
-        item.completePhoneNumber = extraInfo.phoneNumbers[0];
+      console.log(`Raw payload length for CID ${item.cid}:`, rawPayload ? rawPayload.length : 'No data');
+      
+      if (rawPayload) {
+        try {
+          const extraInfo = await extractContactInfoBulletproof(rawPayload);
+          
+          if (extraInfo.phoneNumbers && extraInfo.phoneNumbers.length > 0) {
+            item.completePhoneNumber = extraInfo.phoneNumbers[0]; 
+          }
+          
+          if (extraInfo.address) {
+            item.address = extraInfo.address; 
+          }
+        } catch (err) {
+          console.error(`Failed to parse extra info for CID ${item.cid}:`, err);
+        }
       }
-
-      // In long mode, always overwrite address with the richer version
-      if (mode === 'long' && extraInfo.address) {
-        item.address = extraInfo.address;
-      } else if (extraInfo.address && !item.address) {
-        item.address = extraInfo.address;
-      }
-    } catch (err) {
-      console.error(`Failed to parse extra info for CID ${item.cid}:`, err);
     }
   }
 
