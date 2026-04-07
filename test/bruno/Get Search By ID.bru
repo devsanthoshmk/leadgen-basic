@@ -1,0 +1,29 @@
+meta {
+  name: Get Search By ID
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{baseUrl}}/searches/{{searchId}}?password={{password}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("should return 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("should return search metadata", function() {
+    expect(res.body.search).to.be.an('object');
+    expect(res.body.search.query).to.equal("restaurants in Chennai");
+  });
+
+  test("should return results array", function() {
+    expect(res.body.results).to.be.an('array');
+    expect(res.body.results.length).to.equal(2);
+  });
+}

@@ -1,0 +1,19 @@
+meta {
+  name: Get Search - Not Found
+  type: http
+  seq: 10
+}
+
+get {
+  url: {{baseUrl}}/searches/99999?password={{password}}
+}
+
+tests {
+  test("should return 404 for non-existent search", function() {
+    expect(res.status).to.equal(404);
+  });
+
+  test("should return not found error", function() {
+    expect(res.body.error).to.contain("not found");
+  });
+}

@@ -1,0 +1,36 @@
+meta {
+  name: Get Results By Search ID
+  type: http
+  seq: 5
+}
+
+get {
+  url: {{baseUrl}}/searches/{{searchId}}/results?password={{password}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("should return 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("should return results for the search", function() {
+    expect(res.body.results).to.be.an('array');
+    expect(res.body.results.length).to.equal(2);
+  });
+
+  test("should have correct result fields", function() {
+    var r = res.body.results[0];
+    expect(r).to.have.property('title');
+    expect(r).to.have.property('cid');
+    expect(r).to.have.property('stars');
+    expect(r).to.have.property('reviews');
+    expect(r).to.have.property('category');
+    expect(r).to.have.property('address');
+    expect(r).to.have.property('complete_phone_number');
+    expect(r).to.have.property('url');
+  });
+}

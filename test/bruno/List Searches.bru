@@ -1,0 +1,27 @@
+meta {
+  name: List Searches
+  type: http
+  seq: 3
+}
+
+get {
+  url: {{baseUrl}}/searches?password={{password}}&limit=10&offset=0
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("should return 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("should return searches array", function() {
+    expect(res.body.searches).to.be.an('array');
+  });
+
+  test("should have at least one search", function() {
+    expect(res.body.searches.length).to.be.greaterThan(0);
+  });
+}

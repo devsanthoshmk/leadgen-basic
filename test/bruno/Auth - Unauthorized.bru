@@ -1,0 +1,19 @@
+meta {
+  name: Auth - Unauthorized
+  type: http
+  seq: 7
+}
+
+get {
+  url: {{baseUrl}}/searches
+}
+
+tests {
+  test("should return 401 without auth", function() {
+    expect(res.status).to.equal(401);
+  });
+
+  test("should return error message", function() {
+    expect(res.body.error).to.contain("Unauthorized");
+  });
+}

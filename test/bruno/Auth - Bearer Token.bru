@@ -1,0 +1,23 @@
+meta {
+  name: Auth - Bearer Token
+  type: http
+  seq: 8
+}
+
+get {
+  url: {{baseUrl}}/searches
+}
+
+headers {
+  Authorization: Bearer {{password}}
+}
+
+tests {
+  test("should return 200 with bearer auth", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("should return searches", function() {
+    expect(res.body.searches).to.be.an('array');
+  });
+}

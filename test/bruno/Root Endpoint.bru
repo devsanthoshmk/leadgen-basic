@@ -1,0 +1,24 @@
+meta {
+  name: Root Endpoint
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/?password={{password}}
+}
+
+headers {
+  Content-Type: application/json
+}
+
+tests {
+  test("should return 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("should return API info with endpoints", function() {
+    expect(res.body.message).to.equal("Mergex LeadGen API");
+    expect(res.body.endpoints).to.be.an('object');
+  });
+}

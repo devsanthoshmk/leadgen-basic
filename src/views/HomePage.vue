@@ -753,6 +753,74 @@ export default {
       });
       await alert.present();
     },
+    /**
+     * Pauses the running search. The scraper's onProgress callback checks
+     * `this.searchCancelled` and returns `false`, which makes `search()` stop
+     * and return `{ results, resumeState }`. The resumeState is stored in
+     * `this.resumeState` (see doSearch) and partial results go into `this.row_datas`.
+     *
+     * ## How resume works (backend — already implemented)
+     *
+     * `search()` in scraper.js accepts a 4th arg `resumeState`. When provided:
+     *   - Phase 1 (search pages): starts from `resumeState.pagination` offset
+     *     instead of page 0, and seeds results with `resumeState.partialResults`.
+     *   - Phase 2 (enrich): if paused mid-enrichment, resumes from
+     *     `resumeState.enrichIndex` so already-enriched items aren't re-fetched.
+     *   - If `resumeState.phase === 'enrich'`, Phase 1 is skipped entirely.
+     *
+     * `doSearch()` already passes `this.resumeState` to `search()`, so calling
+     * `doSearch()` again after a pause will automatically resume.
+     *
+     * ## How to add resume UI (not yet implemented)
+     *
+     * 1. **Template** — In the results view, add a resume banner when paused:
+     *    ```html
+     *    <div v-if="resumeState" class="resume-banner">
+     *      <ion-chip color="warning">
+     *        <ion-label>Search paused</ion-label>
+     *      </ion-chip>
+     *      <ion-button size="small" @click="resumeSearch" class="action-btn">
+     *        <ion-icon :icon="playOutline" slot="start"></ion-icon>
+     *        Resume Search
+     *      </ion-button>
+     *    </div>
+     *    ```
+     *    Place this inside `.results-view`, above the filter bar.
+     *
+     * 2. **Import** — Add `playOutline` to the ionicons import and data().
+     *
+     * 3. **Method** — Add `resumeSearch`:
+     *    ```js
+     *    async resumeSearch() {
+     *      // doSearch already reads this.resumeState and passes it to search().
+     *      // Just reset the cancelled flag and re-trigger.
+     *      this.searchCancelled = false;
+     *      await this.doSearch();
+     *    }
+     *    ```
+     *    That's it — doSearch passes `this.resumeState` to `search()`, which
+     *    picks up where it left off. When search completes normally,
+     *    `resumeState` is set to `null` and the banner disappears.
+     *
+     * 4. **Style** — Add resume banner styling:
+     *    ```css
+     *    .resume-banner {
+     *      display: flex;
+     *      align-items: center;
+     *      justify-content: space-between;
+     *      padding: 8px 12px;
+     *      background: rgba(255, 170, 0, 0.08);
+     *      border-bottom: 1px solid rgba(255, 170, 0, 0.2);
+     *    }
+     *    ```
+     *
+     * 5. **Edge cases to handle**:
+     *    - `newSearch()` already clears `this.resumeState = null`.
+     *    - If user edits the query and hits Generate Leads, clear resumeState
+     *      so it doesn't try to resume a different query's pagination.
+     *    - The results toolbar chip could show "X leads (paused)" when
+     *      `resumeState` is non-null.
+     */
     pauseSearch() {
       this.searchCancelled = true;
     },
