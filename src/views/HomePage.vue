@@ -49,6 +49,7 @@
           <h1 class="hero-title">Find Your Next<br/><span class="accent">Qualified Lead</span></h1>
           <p class="hero-sub">Search businesses by type and location. Export leads with phone, email, and address data for your sales pipeline.</p>
         </div>
+
         <div class="search-container" :class="{ shake: shaking }">
           <ion-searchbar
             v-model="input"
@@ -58,17 +59,82 @@
             show-clear-button="focus"
             class="leadgen-search"
           ></ion-searchbar>
+
+          <!-- Search Mode Selector -->
+          <div class="mode-selector">
+            <div class="mode-label">
+              <span class="mode-label-text">Search Mode</span>
+              <button class="mode-info-trigger" @click.stop="modeInfoOpen = true" aria-label="Learn about search modes">
+                <ion-icon :icon="helpCircleOutline"></ion-icon>
+              </button>
+            </div>
+            <div class="mode-options">
+              <button
+                v-for="m in modes"
+                :key="m.id"
+                class="mode-option"
+                :class="{ active: searchMode === m.id }"
+                @click="selectMode(m.id)"
+              >
+                <div class="mode-option-icon">
+                  <ion-icon :icon="m.icon"></ion-icon>
+                </div>
+                <div class="mode-option-body">
+                  <span class="mode-option-name">{{ m.name }} <span v-if="m.inDevelopment" class="mode-dev-badge">In Dev</span></span>
+                  <span class="mode-option-desc">{{ m.shortDesc }}</span>
+                </div>
+                <div v-if="searchMode === m.id" class="mode-check">
+                  <ion-icon :icon="checkmarkCircle"></ion-icon>
+                </div>
+              </button>
+            </div>
+            <!-- Long mode warning -->
+            <transition name="fade">
+              <div v-if="searchMode === 'long'" class="mode-warning">
+                <ion-icon :icon="timeOutline"></ion-icon>
+                <span>Deep mode takes longer and is still in development. It improves address accuracy and slightly increases phone number coverage. Best for small, targeted searches.</span>
+              </div>
+            </transition>
+          </div>
+
+          <!-- Action buttons: Generate / Loading+Pause -->
           <div class="action-buttons">
-            <ion-button :disabled="searching" @click="doSearch" expand="block" class="search-btn">
-              <ion-spinner v-if="searching" name="crescent" slot="start"></ion-spinner>
-              {{ searching ? (progressText || 'Finding leads...') : 'Generate Leads' }}
+            <ion-button v-if="!searching" @click="doSearch" expand="block" class="search-btn">
+              Generate Leads
             </ion-button>
+            <template v-else>
+              <!-- Progress indicator with spinner -->
+              <ion-button expand="block" class="search-btn" disabled>
+                <ion-spinner name="crescent" slot="start"></ion-spinner>
+                {{ progressText || 'Finding leads...' }}
+              </ion-button>
+              <!-- Separate pause button below the progress -->
+              <ion-button expand="block" class="pause-btn" @click="pauseSearch">
+                <ion-icon :icon="pauseOutline" slot="start"></ion-icon>
+                Pause Search
+              </ion-button>
+            </template>
           </div>
         </div>
+
+        <!-- Search History Suggestions (placeholder for future implementation)
+             TODO: Implement search history feature
+             - Store recent searches in localStorage with timestamp
+             - Show last 5-8 searches below the search bar when input is focused
+             - Each suggestion should show: query text, result count, time ago
+             - Clicking a suggestion populates the search bar and triggers search
+             - Add a "Clear History" option at the bottom
+             - Data shape: { query: string, resultCount: number, timestamp: number, mode: string }
+             - Storage key: 'mergex_search_history'
+        -->
+
         <div class="search-tags">
-          <span class="tag" @click="input = 'restaurants in Bangalore'; doSearch()">Restaurants in Bangalore</span>
-          <span class="tag" @click="input = 'Cafes in Mumbai'; doSearch()">Cafes in Mumbai</span>
-          <span class="tag" @click="input = 'Gyms in Hyderabad'; doSearch()">Gyms in Hyderabad</span>
+          <span class="tags-label">Try searching</span>
+          <div class="tags-row">
+            <span class="tag" @click="input = 'Restaurants in Bangalore'; doSearch()">Restaurants in Bangalore</span>
+            <span class="tag" @click="input = 'Cafes in Mumbai'; doSearch()">Cafes in Mumbai</span>
+            <span class="tag" @click="input = 'Gyms in Hyderabad'; doSearch()">Gyms in Hyderabad</span>
+          </div>
         </div>
       </div>
 
@@ -190,6 +256,60 @@
               </ion-button>
             </ion-item>
           </ion-list>
+        </ion-content>
+      </ion-modal>
+
+      <!-- MODE INFO MODAL -->
+      <ion-modal :is-open="modeInfoOpen" @didDismiss="modeInfoOpen = false" :breakpoints="[0, 0.65, 1]" :initialBreakpoint="0.65" class="mode-info-modal">
+        <ion-header>
+          <ion-toolbar>
+            <ion-title>Search Modes</ion-title>
+            <ion-buttons slot="end">
+              <ion-button @click="modeInfoOpen = false">Done</ion-button>
+            </ion-buttons>
+          </ion-toolbar>
+        </ion-header>
+        <ion-content class="ion-padding mode-info-content">
+          <p class="mode-info-intro">Choose how thorough your lead search should be. Each mode balances speed against the amount of data you get back.</p>
+
+          <div v-for="m in modes" :key="m.id" class="mode-info-card" :class="{ recommended: m.id === 'normal' }">
+            <div class="mode-info-card-header">
+              <div class="mode-info-card-icon" :class="'mode-icon-' + m.id">
+                <ion-icon :icon="m.icon"></ion-icon>
+              </div>
+              <div>
+                <h3>{{ m.name }}</h3>
+                <span v-if="m.id === 'normal'" class="mode-recommended-badge">Recommended</span>
+                <span v-if="m.inDevelopment" class="mode-indev-badge">In Development</span>
+              </div>
+            </div>
+            <p class="mode-info-card-desc">{{ m.longDesc }}</p>
+            <div class="mode-info-stats">
+              <div class="mode-stat">
+                <span class="mode-stat-label">Speed</span>
+                <div class="mode-stat-bar">
+                  <div class="mode-stat-fill" :style="{ width: m.speed + '%' }"></div>
+                </div>
+              </div>
+              <div class="mode-stat">
+                <span class="mode-stat-label">Data</span>
+                <div class="mode-stat-bar">
+                  <div class="mode-stat-fill" :style="{ width: m.data + '%' }"></div>
+                </div>
+              </div>
+            </div>
+            <div class="mode-info-details">
+              <span class="mode-detail-item" v-for="(detail, j) in m.details" :key="j">
+                <ion-icon :icon="detail.yes ? checkmarkCircle : closeCircle" :class="detail.yes ? 'detail-yes' : 'detail-no'"></ion-icon>
+                {{ detail.text }}
+              </span>
+            </div>
+          </div>
+
+          <div class="mode-info-tip">
+            <ion-icon :icon="bulbOutline"></ion-icon>
+            <p><strong>Pro Tip:</strong> Start with <strong>Normal</strong> mode for everyday prospecting. Switch to <strong>Fast</strong> when you just need names and addresses quickly. Try <strong>Deep</strong> for small targeted searches where address accuracy and phone coverage matter — more features coming soon.</p>
+          </div>
         </ion-content>
       </ion-modal>
 
@@ -323,6 +443,8 @@ import {
   downloadOutline, arrowBackOutline, starSharp, starOutline,
   callOutline, globeOutline, openOutline, navigateOutline,
   arrowUpOutline, arrowDownOutline, informationCircleOutline, mailOutline,
+  flashOutline, syncOutline, layersOutline, pauseOutline,
+  helpCircleOutline, checkmarkCircle, closeCircle, timeOutline, bulbOutline,
 } from 'ionicons/icons';
 import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
@@ -357,15 +479,73 @@ export default {
       detailOpen: false,
       detailRow: null,
       infoOpen: false,
+      modeInfoOpen: false,
       notificationsGranted: false,
       searchCancelled: false,
+      resumeState: null,
       progressText: '',
+      searchMode: 'normal',
+      modes: [
+        {
+          id: 'fast',
+          name: 'Fast',
+          icon: flashOutline,
+          shortDesc: 'Quick scan, basic info',
+          longDesc: 'Scrapes search result pages only. Gets you names, addresses, ratings, and websites in seconds. Phone numbers may be incomplete since it skips the detail lookup step.',
+          speed: 100,
+          data: 40,
+          details: [
+            { text: 'Business names & addresses', yes: true },
+            { text: 'Ratings & reviews', yes: true },
+            { text: 'Websites', yes: true },
+            { text: 'All phone numbers', yes: false },
+            { text: 'Full address details', yes: false },
+          ],
+        },
+        {
+          id: 'normal',
+          name: 'Auto',
+          icon: syncOutline,
+          shortDesc: 'Automatically balances speed & data',
+          longDesc: 'Default mode. Automatically finds the right balance between speed and completeness — runs the search first, then fills in missing phone numbers only when needed. Smart and efficient for everyday prospecting.',
+          speed: 65,
+          data: 75,
+          details: [
+            { text: 'Business names & addresses', yes: true },
+            { text: 'Ratings & reviews', yes: true },
+            { text: 'Websites', yes: true },
+            { text: 'Missing phone numbers filled', yes: true },
+            { text: 'Full address details', yes: false },
+          ],
+        },
+        {
+          id: 'long',
+          name: 'Deep',
+          icon: layersOutline,
+          shortDesc: 'Better accuracy, in development',
+          longDesc: 'Looks up each result individually to get more accurate full addresses and improves the chance of finding phone numbers. More features coming soon as this mode is still being developed.',
+          speed: 25,
+          data: 65,
+          inDevelopment: true,
+          details: [
+            { text: 'Business names & addresses', yes: true },
+            { text: 'Ratings & reviews', yes: true },
+            { text: 'Websites', yes: true },
+            { text: 'More accurate full addresses', yes: true },
+            { text: 'Higher phone number coverage', yes: true },
+          ],
+        },
+      ],
+      // Search history placeholder
+      // TODO: searchHistory: JSON.parse(localStorage.getItem('mergex_search_history') || '[]'),
       // icons
       logoGithub, logoLinkedin, logoInstagram, logoTwitter, shareSocialOutline,
       downloadOutline, arrowBackOutline,
       starIcon: starSharp, starOutlineIcon: starOutline,
       callOutline, globeOutline, openOutline, navigateOutline,
       arrowUpOutline, arrowDownOutline, informationCircleOutline, mailOutline,
+      helpCircleOutline, checkmarkCircle, closeCircle, timeOutline, bulbOutline,
+      pauseOutline,
     };
   },
   computed: {
@@ -395,10 +575,8 @@ export default {
   },
   async mounted() {
     if (Capacitor.isNativePlatform()) {
-      // Check current notification permission status
       await this.syncNotificationStatus();
 
-      // Show custom pre-prompt on first launch or periodically (every 3 days)
       if (!this.notificationsGranted) {
         const lastAsked = localStorage.getItem('notif_prompt_last');
         const now = Date.now();
@@ -436,7 +614,9 @@ export default {
       }
 
       App.addListener('backButton', async () => {
-        if (this.infoOpen) {
+        if (this.modeInfoOpen) {
+          this.modeInfoOpen = false;
+        } else if (this.infoOpen) {
           this.infoOpen = false;
         } else if (this.detailOpen) {
           this.detailOpen = false;
@@ -460,6 +640,9 @@ export default {
     App.removeAllListeners();
   },
   methods: {
+    selectMode(mode) {
+      this.searchMode = mode;
+    },
     async syncNotificationStatus() {
       try {
         const perm = await LocalNotifications.checkPermissions();
@@ -570,9 +753,13 @@ export default {
       });
       await alert.present();
     },
+    pauseSearch() {
+      this.searchCancelled = true;
+    },
     newSearch() {
       this.view = 'search';
       this.row_datas = [];
+      this.resumeState = null;
       this.showShare = false;
       this.downloadedUri = null;
       this.filterText = '';
@@ -583,6 +770,22 @@ export default {
         setTimeout(() => { this.shaking = false; }, 500);
         return;
       }
+
+      // Show long mode confirmation
+      if (this.searchMode === 'long') {
+        const confirmed = await new Promise(resolve => {
+          alertController.create({
+            header: 'Deep Search (In Development)',
+            message: 'Deep mode looks up each result individually for better addresses and phone numbers. It takes longer and is still being improved. Best for small, targeted queries. Continue?',
+            buttons: [
+              { text: 'Cancel', role: 'cancel', handler: () => resolve(false) },
+              { text: 'Continue', handler: () => resolve(true) },
+            ],
+          }).then(alert => alert.present());
+        });
+        if (!confirmed) return;
+      }
+
       this.searching = true;
       this.searchCancelled = false;
       this.progressText = 'Starting search...';
@@ -607,11 +810,18 @@ export default {
           if (this.searchCancelled) return false;
         };
 
-        this.row_datas = await search(this.input, 'normal', onProgress);
+        const searchResult = await search(this.input, this.searchMode, onProgress, this.resumeState);
+        this.row_datas = searchResult.results;
+        this.resumeState = searchResult.resumeState;
+
+        // TODO: Save to search history
+        // const history = JSON.parse(localStorage.getItem('mergex_search_history') || '[]');
+        // history.unshift({ query: this.input, resultCount: this.row_datas.length, timestamp: Date.now(), mode: this.searchMode });
+        // localStorage.setItem('mergex_search_history', JSON.stringify(history.slice(0, 8)));
 
         if (this.searchCancelled) {
           const toast = await toastController.create({
-            message: `Search cancelled. Found ${this.row_datas.length} leads so far.`, duration: 3000, position: 'bottom', color: 'warning',
+            message: `Search paused. Found ${this.row_datas.length} leads so far.`, duration: 3000, position: 'bottom', color: 'warning',
           });
           await toast.present();
           if (this.row_datas.length > 0) this.view = 'results';
@@ -662,7 +872,6 @@ export default {
         if (Capacitor.isNativePlatform()) {
           this.showShare = true;
           this.downloadedUri = result.uri;
-          // Nudge user if notifications aren't enabled
           await this.syncNotificationStatus();
           if (!this.notificationsGranted) {
             await this.showNotificationNudgeToast();
@@ -793,8 +1002,159 @@ export default {
   --color: #f0f0f0;
   --placeholder-color: #666;
 }
+
+/* Mode Selector */
+.mode-selector {
+  margin-top: 16px;
+  padding: 0 4px;
+}
+.mode-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.mode-label-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: #888;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+.mode-info-trigger {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #666;
+  font-size: 18px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: color 0.2s;
+}
+.mode-info-trigger:hover {
+  color: #E8FF00;
+}
+.mode-options {
+  display: flex;
+  gap: 8px;
+}
+.mode-option {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #1A1A1A;
+  border: 1.5px solid #252525;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+  color: #888;
+  position: relative;
+  overflow: hidden;
+}
+.mode-option:hover {
+  border-color: #333;
+  background: #1f1f1f;
+}
+.mode-option.active {
+  border-color: #E8FF00;
+  background: rgba(232, 255, 0, 0.05);
+  color: #f0f0f0;
+}
+.mode-option-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: #252525;
+  font-size: 16px;
+  flex-shrink: 0;
+  transition: all 0.2s;
+}
+.mode-option.active .mode-option-icon {
+  background: rgba(232, 255, 0, 0.15);
+  color: #E8FF00;
+}
+.mode-option-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.mode-option-name {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.mode-option-desc {
+  font-size: 10px;
+  color: #666;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mode-option.active .mode-option-desc {
+  color: #888;
+}
+.mode-dev-badge {
+  display: inline-block;
+  padding: 1px 5px;
+  border-radius: 6px;
+  background: rgba(255, 140, 0, 0.15);
+  color: #ff8c00;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  vertical-align: middle;
+  margin-left: 4px;
+}
+.mode-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  color: #E8FF00;
+  font-size: 14px;
+  display: flex;
+}
+
+/* Long mode warning */
+.mode-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: rgba(255, 170, 0, 0.08);
+  border: 1px solid rgba(255, 170, 0, 0.2);
+  border-radius: 8px;
+  color: #ffaa00;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.mode-warning ion-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.fade-enter-active, .fade-leave-active {
+  transition: all 0.25s ease;
+}
+.fade-enter-from, .fade-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
 .action-buttons {
-  margin-top: 12px;
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .search-btn {
   --background: #E8FF00;
@@ -807,11 +1167,33 @@ export default {
 .search-btn:hover {
   --background: #d4eb00;
 }
+.pause-btn {
+  --background: transparent;
+  --color: #E8FF00;
+  --border-color: #E8FF00;
+  --border-style: solid;
+  --border-width: 1.5px;
+  --border-radius: 12px;
+  font-weight: 600;
+  font-size: 13px;
+  height: 48px;
+}
 .search-tags {
+  margin-top: 28px;
+  text-align: center;
+}
+.tags-label {
+  display: block;
+  font-size: 11px;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 10px;
+}
+.tags-row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 20px;
   justify-content: center;
 }
 .tag {
@@ -822,10 +1204,12 @@ export default {
   font-size: 12px;
   cursor: pointer;
   transition: all 0.2s;
+  border: 1px solid transparent;
 }
 .tag:hover {
   background: #252525;
   color: #E8FF00;
+  border-color: rgba(232, 255, 0, 0.2);
 }
 
 /* Results toolbar */
@@ -949,6 +1333,168 @@ export default {
   word-break: break-all;
 }
 
+/* Mode Info Modal */
+.mode-info-content {
+  --background: #0F0F0F;
+}
+.mode-info-intro {
+  color: #888;
+  font-size: 14px;
+  line-height: 1.5;
+  margin-bottom: 20px;
+}
+.mode-info-card {
+  background: #1A1A1A;
+  border: 1px solid #252525;
+  border-radius: 14px;
+  padding: 16px;
+  margin-bottom: 12px;
+  transition: border-color 0.2s;
+}
+.mode-info-card.recommended {
+  border-color: rgba(232, 255, 0, 0.3);
+}
+.mode-info-card-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+.mode-info-card-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+.mode-icon-fast {
+  background: rgba(0, 200, 255, 0.12);
+  color: #00c8ff;
+}
+.mode-icon-normal {
+  background: rgba(232, 255, 0, 0.12);
+  color: #E8FF00;
+}
+.mode-icon-long {
+  background: rgba(255, 140, 0, 0.12);
+  color: #ff8c00;
+}
+.mode-info-card-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #f0f0f0;
+}
+.mode-recommended-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(232, 255, 0, 0.15);
+  color: #E8FF00;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.mode-indev-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(255, 140, 0, 0.15);
+  color: #ff8c00;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.mode-info-card-desc {
+  color: #aaa;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0 0 12px;
+}
+.mode-info-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.mode-stat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.mode-stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #666;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  width: 40px;
+  flex-shrink: 0;
+}
+.mode-stat-bar {
+  flex: 1;
+  height: 6px;
+  background: #252525;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.mode-stat-fill {
+  height: 100%;
+  background: #E8FF00;
+  border-radius: 3px;
+  transition: width 0.4s ease;
+}
+.mode-info-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.mode-detail-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #aaa;
+}
+.detail-yes {
+  color: #4ade80;
+  font-size: 14px;
+}
+.detail-no {
+  color: #555;
+  font-size: 14px;
+}
+.mode-info-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 14px;
+  background: rgba(232, 255, 0, 0.05);
+  border: 1px solid rgba(232, 255, 0, 0.15);
+  border-radius: 12px;
+}
+.mode-info-tip ion-icon {
+  color: #E8FF00;
+  font-size: 20px;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.mode-info-tip p {
+  margin: 0;
+  color: #aaa;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.mode-info-tip strong {
+  color: #f0f0f0;
+}
+
 /* Footer */
 .footer-toolbar {
   --background: #0F0F0F;
@@ -1067,5 +1613,61 @@ export default {
   0%, 100% { transform: translateX(0); }
   10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
   20%, 40%, 60%, 80% { transform: translateX(5px); }
+}
+
+/* Responsive - small screens stack mode options vertically */
+@media (max-width: 420px) {
+  .mode-options {
+    flex-direction: column;
+  }
+  .mode-option {
+    padding: 10px 14px;
+  }
+  .mode-option-desc {
+    white-space: normal;
+  }
+}
+
+/* Desktop/web - wider layout */
+@media (min-width: 768px) {
+  .content-center {
+    padding: 40px 24px;
+  }
+  .hero-title {
+    font-size: 36px;
+  }
+  .hero-sub {
+    font-size: 16px;
+    max-width: 480px;
+  }
+  .search-container {
+    max-width: 640px;
+  }
+  .mode-option {
+    padding: 12px 16px;
+  }
+  .mode-option-desc {
+    font-size: 11px;
+  }
+  .cards-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 8px;
+    padding: 12px;
+  }
+  .data-card {
+    margin-bottom: 0;
+  }
+}
+
+@media (min-width: 1024px) {
+  .hero-title {
+    font-size: 42px;
+  }
+  .cards-container {
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    gap: 12px;
+    padding: 16px;
+  }
 }
 </style>

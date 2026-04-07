@@ -340,45 +340,89 @@ async function fetchit(url) {
 /**
  * Searches Google Local listings and returns structured business data.
  *
+ * Supports **pause & resume**: when `onProgress` returns `false`, the search
+ * stops immediately and returns a result object whose `resumeState` is non-null.
+ * Pass that `resumeState` back as the fourth argument to continue where you
+ * left off — it carries the pagination offset, already-collected results, and
+ * enrichment progress so nothing is re-fetched.
+ *
+ * ### Return shape
+ *
+ * ```js
+ * {
+ *   results: Array<Object>,   // The business listings collected so far
+ *   resumeState: {            // null when the search completed normally
+ *     query: string,          // Original search query
+ *     mode: string,           // Search mode that was active
+ *     pagination: number,     // Google pagination offset to resume from
+ *     phase: 'search' | 'enrich',  // Which phase was interrupted
+ *     enrichIndex: number,    // (enrich phase) index of the next item to enrich
+ *     partialResults: Array,  // Deduplicated results including any enriched so far
+ *   } | null
+ * }
+ * ```
+ *
+ * ### Resume example
+ *
+ * ```js
+ * // First run — user pauses mid-search
+ * const first = await search('cafes in Mumbai', 'normal', progressCb);
+ * // first.resumeState !== null  →  search was paused
+ *
+ * // Later — continue from where we left off
+ * const second = await search('cafes in Mumbai', 'normal', progressCb, first.resumeState);
+ * // second.resumeState === null  →  search completed
+ * ```
+ *
  * @param {string} query - The search query (e.g. "plumbers in Mumbai").
  * @param {"fast"|"normal"|"long"} [mode="normal"] - Controls speed vs completeness.
- *   - "fast"   : Search pages only, no extra fetches.
- *   - "normal" : Fetches missing phone numbers via CID lookup.
- *   - "long"   : Fetches extra details for every result.
- * @returns {Promise<Array<Object>>} Array of business listing objects.
+ * @param {Function|null} [onProgress=null] - Progress callback. Return `false` to pause.
+ * @param {Object|null} [resumeState=null] - State object from a previous paused search.
+ * @returns {Promise<{results: Array<Object>, resumeState: Object|null}>}
  */
-export async function search(query, mode = 'normal', onProgress = null) {
-  const fullList = [];
-  let pagination = 0;
-  let pageNum = 0;
+export async function search(query, mode = 'normal', onProgress = null, resumeState = null) {
+  // --- Restore state from a previous paused run, or start fresh ---
+  let fullList = resumeState ? [...resumeState.partialResults] : [];
+  let pagination = resumeState ? resumeState.pagination : 0;
+  let pageNum = resumeState ? Math.floor(resumeState.pagination / 10) : 0;
+  const startInEnrich = resumeState?.phase === 'enrich';
+  let enrichStartIndex = resumeState?.enrichIndex ?? 0;
 
-  // Phase 1: Main Search Loop
-  while (true) {
-    pageNum++;
-    if (onProgress) {
-      const cont = onProgress({ phase: 'search', page: pageNum, found: fullList.length, message: `Searching page ${pageNum}...` });
-      if (cont === false) return fullList;
-    }
+  // Phase 1: Main Search Loop (skipped if resuming into enrich phase)
+  if (!startInEnrich) {
+    while (true) {
+      pageNum++;
+      if (onProgress) {
+        const cont = onProgress({ phase: 'search', page: pageNum, found: fullList.length, message: `Searching page ${pageNum}...` });
+        if (cont === false) {
+          const uniqueResults = dedup(fullList);
+          return {
+            results: uniqueResults,
+            resumeState: { query, mode, pagination, phase: 'search', enrichIndex: 0, partialResults: uniqueResults },
+          };
+        }
+      }
 
-    const url = new URL('https://www.google.com/search');
-    url.search = new URLSearchParams({
-      q: query,
-      start: pagination,
-      udm: '1',
-    }).toString();
-    console.log(`[${mode}] Fetching Search Page: ${url}`);
+      const url = new URL('https://www.google.com/search');
+      url.search = new URLSearchParams({
+        q: query,
+        start: pagination,
+        udm: '1',
+      }).toString();
+      console.log(`[${mode}] Fetching Search Page: ${url}`);
 
-    const result = await fetchit(url.toString());
-    if (result?.length > 0) {
-      pagination += 10;
-      fullList.push(...result);
-    } else {
-      break;
+      const result = await fetchit(url.toString());
+      if (result?.length > 0) {
+        pagination += 10;
+        fullList.push(...result);
+      } else {
+        break;
+      }
     }
   }
 
   // Deduplicate before doing intensive sub-fetches
-  const uniqueResults = Array.from(new Map(fullList.map(item => [item.cid || (item.title + item.address), item])).values());
+  const uniqueResults = dedup(fullList);
 
   if (onProgress) {
     onProgress({ phase: 'search-done', found: uniqueResults.length, message: `Found ${uniqueResults.length} leads` });
@@ -386,29 +430,33 @@ export async function search(query, mode = 'normal', onProgress = null) {
 
   // Fast mode: return immediately with what we have
   if (mode === 'fast') {
-    return uniqueResults;
+    return { results: uniqueResults, resumeState: null };
+  }
+
+  // Normal mode: skip enrichment entirely if ANY result already has a phone number
+  const anyPhoneFound = uniqueResults.some(item => !!item.completePhoneNumber);
+  if (mode === 'normal' && anyPhoneFound) {
+    console.log('[normal] Phone numbers found in search results, skipping enrichment.');
+    return { results: uniqueResults, resumeState: null };
   }
 
   // Phase 2: Extra detail fetches via CID
-  let enriched = 0;
-  const toEnrich = uniqueResults.filter(item => {
-    return mode === 'long' ? !!item.cid : !item.completePhoneNumber && !!item.cid;
-  });
+  const toEnrich = uniqueResults.filter(item => !!item.cid);
+  let enriched = enrichStartIndex;
 
-  for (const item of uniqueResults) {
-    // normal: only fetch for items missing a phone number
-    // long:   fetch for every item that has a CID
-    const shouldFetch =
-      mode === 'long'
-        ? !!item.cid
-        : !item.completePhoneNumber && !!item.cid;
-
-    if (!shouldFetch) continue;
+  for (let i = enrichStartIndex; i < uniqueResults.length; i++) {
+    const item = uniqueResults[i];
+    if (!item.cid) continue;
 
     enriched++;
     if (onProgress) {
       const cont = onProgress({ phase: 'enrich', current: enriched, total: toEnrich.length, message: `Enriching ${enriched}/${toEnrich.length} leads...` });
-      if (cont === false) return uniqueResults;
+      if (cont === false) {
+        return {
+          results: uniqueResults,
+          resumeState: { query, mode, pagination, phase: 'enrich', enrichIndex: i, partialResults: uniqueResults },
+        };
+      }
     }
 
     console.log(`[${mode}] Fetching details for "${item.title}" (CID: ${item.cid})...`);
@@ -423,7 +471,6 @@ export async function search(query, mode = 'normal', onProgress = null) {
         item.completePhoneNumber = extraInfo.phoneNumbers[0];
       }
 
-      // In long mode, always overwrite address with the richer version
       if (mode === 'long' && extraInfo.address) {
         item.address = extraInfo.address;
       } else if (extraInfo.address && !item.address) {
@@ -434,5 +481,10 @@ export async function search(query, mode = 'normal', onProgress = null) {
     }
   }
 
-  return uniqueResults;
+  return { results: uniqueResults, resumeState: null };
+}
+
+/** Deduplicates results by CID or title+address composite key. */
+function dedup(list) {
+  return Array.from(new Map(list.map(item => [item.cid || (item.title + item.address), item])).values());
 }

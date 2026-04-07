@@ -2,7 +2,7 @@ import * as scraper from "../../src/services/scraper.js";
 import { writeFile } from "fs/promises"; // 1. Import the file system promise API
 
 try {
-  const result = await scraper.search(`cafe in vandavasi`);
+  const result = await scraper.search(`gym in vandavasi`);
   
   // 2. Convert the object to a JSON string
   // The 'null, 2' arguments add 2-space indentation for readability
