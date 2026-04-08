@@ -19,7 +19,7 @@
 		{
 			"binding": "DB",
 			"database_name": "leadgen-db",
-			"database_id": "<PASTE_YOUR_D1_DATABASE_ID_HERE>"
+			"database_id": "424f0492-4177-4e55-825a-8794afd0d394"
 		}
 	]
 }

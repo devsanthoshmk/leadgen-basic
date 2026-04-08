@@ -9,7 +9,11 @@
           </div>
         </ion-title>
         <ion-buttons slot="end">
-          <ion-button v-if="view === 'results'" @click="newSearch" fill="clear">
+          <!-- Sync status indicator -->
+          <ion-button fill="clear" class="sync-indicator" :class="'sync-' + syncStatus" v-if="cloudSyncEnabled">
+            <ion-icon :icon="syncStatusIcon" slot="icon-only" :class="{ 'spin-icon': syncStatus === 'syncing' }"></ion-icon>
+          </ion-button>
+          <ion-button v-if="view === 'results'" @click="goBack()" fill="clear">
             <ion-icon :icon="arrowBackOutline" slot="icon-only"></ion-icon>
           </ion-button>
           <ion-button @click="infoOpen = true" fill="clear">
@@ -21,7 +25,9 @@
       <!-- Results toolbar -->
       <ion-toolbar v-if="view === 'results'" class="results-toolbar">
         <ion-chip class="results-chip">
-          <ion-label>{{ row_datas.length }} leads found</ion-label>
+          <ion-icon v-if="resultSource === 'cloud'" :icon="cloudDoneOutline" style="margin-right:4px"></ion-icon>
+          <ion-icon v-else-if="resultSource === 'cache'" :icon="timeOutline" style="margin-right:4px"></ion-icon>
+          <ion-label>{{ row_datas.length }} leads found{{ resultSource === 'cloud' ? ' (Cloud)' : resultSource === 'cache' ? ' (Cached)' : '' }}{{ resumeState ? ' (paused)' : '' }}</ion-label>
         </ion-chip>
         <ion-buttons slot="end">
           <ion-button v-if="!downloadedUri" @click="downloadExcel" fill="solid" size="small" class="action-btn">
@@ -117,17 +123,7 @@
           </div>
         </div>
 
-        <!-- Search History Suggestions (placeholder for future implementation)
-             TODO: Implement search history feature
-             - Store recent searches in localStorage with timestamp
-             - Show last 5-8 searches below the search bar when input is focused
-             - Each suggestion should show: query text, result count, time ago
-             - Clicking a suggestion populates the search bar and triggers search
-             - Add a "Clear History" option at the bottom
-             - Data shape: { query: string, resultCount: number, timestamp: number, mode: string }
-             - Storage key: 'mergex_search_history'
-        -->
-
+  
         <div class="search-tags">
           <span class="tags-label">Try searching</span>
           <div class="tags-row">
@@ -313,6 +309,117 @@
         </ion-content>
       </ion-modal>
 
+      <!-- HISTORY VIEW -->
+      <div v-if="view === 'history'" class="history-view">
+        <div class="view-header">
+          <div class="view-header-row">
+            <h2>History</h2>
+            <button class="header-info-btn" @click="showHistoryInfo" aria-label="About history">
+              <ion-icon :icon="helpCircleOutline"></ion-icon>
+            </button>
+          </div>
+          <ion-searchbar v-model="historyFilter" placeholder="Filter history..." :debounce="200" class="filter-search" show-clear-button="focus"></ion-searchbar>
+        </div>
+
+        <ion-refresher slot="fixed" @ionRefresh="refreshHistory($event)">
+          <ion-refresher-content></ion-refresher-content>
+        </ion-refresher>
+
+        <div v-if="filteredHistory.length === 0" class="empty-state">
+          <ion-icon :icon="timeOutline" class="empty-icon"></ion-icon>
+          <h3>No search history</h3>
+          <p>Your past searches will appear here.</p>
+        </div>
+
+        <div v-else class="history-list">
+          <div v-for="item in filteredHistory" :key="item.id || item.timestamp"
+            class="history-item" :class="{ 'history-item--paused': item.status === 'paused' }"
+            @click="item.status === 'paused' ? viewPausedResults(item) : loadHistoryItem(item)">
+            <div class="history-item-left">
+              <div class="history-item-status-dot" :class="item.status === 'paused' ? 'dot-amber' : 'dot-green'"></div>
+            </div>
+            <div class="history-item-body">
+              <div class="history-item-query">{{ item.query }}</div>
+              <div class="history-item-meta">
+                <span class="history-tag" :class="'history-tag--' + (item.mode || 'normal')">{{ item.mode === 'normal' || !item.mode ? 'auto' : item.mode }}</span>
+                <span v-if="item.status === 'paused'" class="history-tag history-tag--partial">partial</span>
+                <span class="history-meta-sep">&middot;</span>
+                <span>{{ item.result_count || item.resultCount || 0 }} leads</span>
+                <span class="history-meta-sep">&middot;</span>
+                <span>{{ timeAgo(item.created_at || item.timestamp) }}</span>
+              </div>
+            </div>
+            <div class="history-item-actions">
+              <button v-if="item.status === 'paused'" class="history-action-btn history-action-btn--resume" @click.stop="resumeFromHistory(item)" aria-label="Resume search">
+                <ion-icon :icon="playCircleOutline"></ion-icon>
+              </button>
+              <ion-icon v-else :icon="item.source === 'cloud' ? cloudDoneOutline : phonePortraitOutline" class="history-source-icon"></ion-icon>
+              <button class="history-action-btn history-action-btn--delete" @click.stop="deleteHistoryItem(item)" aria-label="Delete">
+                <ion-icon :icon="trashOutline"></ion-icon>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- SETTINGS VIEW -->
+      <div v-if="view === 'settings'" class="settings-view">
+        <div class="view-header">
+          <h2>Settings</h2>
+        </div>
+
+        <div class="settings-section">
+          <h3 class="settings-section-title">Cloud Sync</h3>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <span class="settings-item-label">Enable Cloud Sync</span>
+              <span class="settings-item-desc">Sync searches across devices</span>
+            </div>
+            <ion-toggle v-model="cloudSyncEnabled" @ionChange="onCloudSyncToggle"></ion-toggle>
+          </div>
+          <div class="settings-item" v-if="cloudSyncEnabled">
+            <div class="settings-item-info">
+              <span class="settings-item-label">API Status</span>
+              <span class="settings-item-desc">{{ apiStatusText }}</span>
+            </div>
+            <span class="api-dot" :class="apiStatusColor"></span>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3 class="settings-section-title">Data</h3>
+          <div class="settings-item" @click="clearLocalCache">
+            <div class="settings-item-info">
+              <span class="settings-item-label">Clear Local Cache</span>
+              <span class="settings-item-desc">{{ cacheCount }} cached searches</span>
+            </div>
+            <ion-icon :icon="trashOutline" color="danger"></ion-icon>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3 class="settings-section-title">Notifications</h3>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <span class="settings-item-label">Push Notifications</span>
+              <span class="settings-item-desc">{{ notificationsGranted ? 'Enabled' : 'Disabled' }}</span>
+            </div>
+            <ion-button v-if="!notificationsGranted" size="small" fill="outline" @click="requestNotificationPermission">Enable</ion-button>
+            <ion-icon v-else :icon="checkmarkCircle" color="success"></ion-icon>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3 class="settings-section-title">About</h3>
+          <div class="settings-item">
+            <div class="settings-item-info">
+              <span class="settings-item-label">Mergex LeadGen</span>
+              <span class="settings-item-desc">v2.0.0</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- INFO MODAL -->
       <ion-modal :is-open="infoOpen" @didDismiss="infoOpen = false">
         <ion-header>
@@ -417,13 +524,20 @@
     </ion-content>
 
     <ion-footer>
-      <ion-toolbar class="footer-toolbar">
-        <div class="footer-content">
-          <span class="footer-brand">Mergex</span>
-          <span class="footer-dot">&middot;</span>
-          <span class="footer-text">Scale Is Not Luck. It's Structure.</span>
-        </div>
-      </ion-toolbar>
+      <div class="bottom-nav">
+        <button class="bottom-nav-item" :class="{ active: view === 'search' || view === 'results' }" @click="tabNavigate('search')">
+          <ion-icon :icon="searchOutline"></ion-icon>
+          <span>Search</span>
+        </button>
+        <button class="bottom-nav-item" :class="{ active: view === 'history' }" @click="tabNavigate('history')">
+          <ion-icon :icon="timeOutline"></ion-icon>
+          <span>History</span>
+        </button>
+        <button class="bottom-nav-item" :class="{ active: view === 'settings' }" @click="tabNavigate('settings')">
+          <ion-icon :icon="settingsOutline"></ion-icon>
+          <span>Settings</span>
+        </button>
+      </div>
     </ion-footer>
   </ion-page>
 </template>
@@ -434,7 +548,8 @@ import {
   IonSearchbar, IonButton, IonButtons, IonSpinner, IonIcon,
   IonCard, IonCardHeader, IonCardTitle, IonCardSubtitle, IonCardContent,
   IonChip, IonLabel, IonSelect, IonSelectOption,
-  IonModal, IonList, IonItem,
+  IonModal, IonList, IonItem, IonToggle,
+  IonRefresher, IonRefresherContent,
   toastController,
   alertController,
 } from '@ionic/vue';
@@ -445,12 +560,85 @@ import {
   arrowUpOutline, arrowDownOutline, informationCircleOutline, mailOutline,
   flashOutline, syncOutline, layersOutline, pauseOutline,
   helpCircleOutline, checkmarkCircle, closeCircle, timeOutline, bulbOutline,
+  searchOutline, settingsOutline, cloudDoneOutline, cloudOfflineOutline,
+  alertCircleOutline, playCircleOutline, trashOutline, phonePortraitOutline,
 } from 'ionicons/icons';
 import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { search } from '../services/scraper.js';
 import { makeExcel, shareLastFile, SaveToDownloads } from '../services/excel.js';
+import * as api from '../services/api.js';
+
+// ─── Local Cache helpers ────────────────────────────────────────────────────
+const CACHE_PREFIX = 'mergex_cache_';
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24h
+const CACHE_MAX = 20;
+
+function cacheKey(query, mode) {
+  // Simple hash — no need for real md5
+  let h = 0;
+  const s = (query + '|' + mode).toLowerCase();
+  for (let i = 0; i < s.length; i++) {
+    h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  }
+  return CACHE_PREFIX + Math.abs(h).toString(36);
+}
+
+function getCachedSearch(query, mode) {
+  try {
+    const key = cacheKey(query, mode);
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const entry = JSON.parse(raw);
+    if (Date.now() - entry.timestamp > CACHE_TTL) {
+      localStorage.removeItem(key);
+      return null;
+    }
+    return entry;
+  } catch { return null; }
+}
+
+function setCachedSearch(query, mode, results) {
+  try {
+    const key = cacheKey(query, mode);
+    localStorage.setItem(key, JSON.stringify({ results, timestamp: Date.now(), query, mode }));
+    // LRU eviction
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k.startsWith(CACHE_PREFIX)) {
+        try {
+          const e = JSON.parse(localStorage.getItem(k));
+          keys.push({ key: k, ts: e.timestamp || 0 });
+        } catch { keys.push({ key: k, ts: 0 }); }
+      }
+    }
+    if (keys.length > CACHE_MAX) {
+      keys.sort((a, b) => a.ts - b.ts);
+      for (let i = 0; i < keys.length - CACHE_MAX; i++) {
+        localStorage.removeItem(keys[i].key);
+      }
+    }
+  } catch { /* ignore */ }
+}
+
+function getCacheCount() {
+  let count = 0;
+  for (let i = 0; i < localStorage.length; i++) {
+    if (localStorage.key(i).startsWith(CACHE_PREFIX)) count++;
+  }
+  return count;
+}
+
+function clearAllCache() {
+  const toRemove = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k.startsWith(CACHE_PREFIX)) toRemove.push(k);
+  }
+  toRemove.forEach(k => localStorage.removeItem(k));
+}
 
 let ForegroundService = null;
 
@@ -461,12 +649,14 @@ export default {
     IonSearchbar, IonButton, IonButtons, IonSpinner, IonIcon,
     IonCard, IonCardHeader, IonCardTitle, IonCardSubtitle, IonCardContent,
     IonChip, IonLabel, IonSelect, IonSelectOption,
-    IonModal, IonList, IonItem,
+    IonModal, IonList, IonItem, IonToggle,
+    IonRefresher, IonRefresherContent,
   },
   data() {
     return {
       input: '',
       view: 'search',
+      viewStack: [],  // navigation history for back button
       searching: false,
       shaking: false,
       row_datas: [],
@@ -536,8 +726,23 @@ export default {
           ],
         },
       ],
-      // Search history placeholder
-      // TODO: searchHistory: JSON.parse(localStorage.getItem('mergex_search_history') || '[]'),
+      // Cloud sync
+      cloudSyncEnabled: localStorage.getItem('mergex_cloud_sync') !== 'false',
+      syncStatus: 'idle', // idle | syncing | synced | offline | error
+      resultSource: null, // null | 'cloud' | 'cache'
+      // History
+      historyItems: [],
+      historyFilter: '',
+      // Settings
+      apiStatusText: 'Checking...',
+      apiStatusColor: 'dot-gray',
+      cacheCount: getCacheCount(),
+      // Device ID for resume
+      deviceId: localStorage.getItem('mergex_device_id') || (() => {
+        const id = 'dev_' + Math.random().toString(36).slice(2, 10);
+        localStorage.setItem('mergex_device_id', id);
+        return id;
+      })(),
       // icons
       logoGithub, logoLinkedin, logoInstagram, logoTwitter, shareSocialOutline,
       downloadOutline, arrowBackOutline,
@@ -545,10 +750,24 @@ export default {
       callOutline, globeOutline, openOutline, navigateOutline,
       arrowUpOutline, arrowDownOutline, informationCircleOutline, mailOutline,
       helpCircleOutline, checkmarkCircle, closeCircle, timeOutline, bulbOutline,
-      pauseOutline,
+      pauseOutline, searchOutline, settingsOutline,
+      cloudDoneOutline, cloudOfflineOutline, alertCircleOutline,
+      playCircleOutline, trashOutline, phonePortraitOutline,
     };
   },
   computed: {
+    syncStatusIcon() {
+      if (this.syncStatus === 'synced') return cloudDoneOutline;
+      if (this.syncStatus === 'syncing') return syncOutline;
+      if (this.syncStatus === 'offline') return cloudOfflineOutline;
+      if (this.syncStatus === 'error') return alertCircleOutline;
+      return cloudDoneOutline;
+    },
+    filteredHistory() {
+      if (!this.historyFilter) return this.historyItems;
+      const q = this.historyFilter.toLowerCase();
+      return this.historyItems.filter(h => h.query.toLowerCase().includes(q));
+    },
     filteredData() {
       let data = [...this.row_datas];
       if (this.filterText) {
@@ -574,6 +793,9 @@ export default {
     },
   },
   async mounted() {
+    // Check API health if cloud sync enabled
+    if (this.cloudSyncEnabled) this.checkApiHealth();
+
     if (Capacitor.isNativePlatform()) {
       await this.syncNotificationStatus();
 
@@ -614,15 +836,8 @@ export default {
       }
 
       App.addListener('backButton', async () => {
-        if (this.modeInfoOpen) {
-          this.modeInfoOpen = false;
-        } else if (this.infoOpen) {
-          this.infoOpen = false;
-        } else if (this.detailOpen) {
-          this.detailOpen = false;
-        } else if (this.view === 'results') {
-          this.newSearch();
-        } else {
+        const result = this.goBack();
+        if (result === 'exit') {
           const alert = await alertController.create({
             header: 'Exit Mergex LeadGen',
             message: 'Are you sure you want to exit?',
@@ -824,14 +1039,313 @@ export default {
     pauseSearch() {
       this.searchCancelled = true;
     },
+    navigateTo(target, { pushStack = true } = {}) {
+      const prev = this.view;
+      if (target === prev) return;
+
+      if (pushStack && prev) {
+        this.viewStack.push(prev);
+      }
+
+      if (target === 'search') {
+        if (prev === 'results') {
+          this.row_datas = [];
+          this.resumeState = null;
+          this.resultSource = null;
+          this.showShare = false;
+          this.downloadedUri = null;
+          this.filterText = '';
+        }
+        this.view = 'search';
+      } else if (target === 'history') {
+        this.view = 'history';
+        this.loadHistory();
+      } else if (target === 'settings') {
+        this.view = 'settings';
+        this.cacheCount = getCacheCount();
+        if (this.cloudSyncEnabled) {
+          this.checkApiHealth();
+        }
+      }
+    },
+    goBack() {
+      // Close any open modals first
+      if (this.modeInfoOpen) { this.modeInfoOpen = false; return; }
+      if (this.infoOpen) { this.infoOpen = false; return; }
+      if (this.detailOpen) { this.detailOpen = false; return; }
+
+      // Clean up results state when leaving results
+      if (this.view === 'results') {
+        this.row_datas = [];
+        this.resumeState = null;
+        this.resultSource = null;
+        this.showShare = false;
+        this.downloadedUri = null;
+        this.filterText = '';
+      }
+
+      // Pop from view stack
+      if (this.viewStack.length > 0) {
+        const prev = this.viewStack.pop();
+        this.view = prev;
+        if (prev === 'history') this.loadHistory();
+        return;
+      }
+
+      // Already at root (search) — nothing in stack
+      if (this.view === 'search') return 'exit';
+
+      // Fallback — go to search
+      this.view = 'search';
+    },
+    tabNavigate(target) {
+      // Tab bar taps reset the stack — direct navigation, not push
+      this.viewStack = [];
+      if (target === this.view) return;
+      this.navigateTo(target, { pushStack: false });
+    },
     newSearch() {
       this.view = 'search';
       this.row_datas = [];
       this.resumeState = null;
+      this.resultSource = null;
       this.showShare = false;
       this.downloadedUri = null;
       this.filterText = '';
     },
+    timeAgo(dateStr) {
+      if (!dateStr) return '';
+      const d = typeof dateStr === 'number' ? dateStr : new Date(dateStr).getTime();
+      const diff = Date.now() - d;
+      const mins = Math.floor(diff / 60000);
+      if (mins < 1) return 'just now';
+      if (mins < 60) return `${mins}m ago`;
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return `${hrs}h ago`;
+      const days = Math.floor(hrs / 24);
+      return `${days}d ago`;
+    },
+    // ─── Cloud Sync helpers ──────────────────────────────────────────────
+    async checkApiHealth() {
+      console.log('[CloudSync] Checking API health...');
+      try {
+        const res = await api.checkHealth();
+        if (res.ok) {
+          console.log(`[CloudSync] API healthy, latency: ${res.latency}ms`);
+          this.apiStatusText = `Connected (${res.latency}ms)`;
+          this.apiStatusColor = 'dot-green';
+          this.syncStatus = 'idle';
+        } else {
+          console.warn(`[CloudSync] API health check failed: ${res.error}`);
+          this.apiStatusText = res.error === 'offline' ? 'Offline' : `Error: ${res.error}`;
+          this.apiStatusColor = res.error === 'offline' ? 'dot-yellow' : 'dot-red';
+          this.syncStatus = res.error === 'offline' ? 'offline' : 'error';
+        }
+      } catch (err) {
+        console.error('[CloudSync] API unreachable:', err);
+        this.apiStatusText = 'Unreachable';
+        this.apiStatusColor = 'dot-red';
+        this.syncStatus = 'error';
+      }
+    },
+    onCloudSyncToggle() {
+      console.log(`[CloudSync] Toggle: ${this.cloudSyncEnabled ? 'ENABLED' : 'DISABLED'}`);
+      localStorage.setItem('mergex_cloud_sync', this.cloudSyncEnabled ? 'true' : 'false');
+      if (this.cloudSyncEnabled) this.checkApiHealth();
+    },
+    // ─── History ─────────────────────────────────────────────────────────
+    async loadHistory() {
+      const items = [];
+      // Load from cloud if enabled
+      if (this.cloudSyncEnabled) {
+        console.log('[CloudSync] Loading search history from cloud...');
+        const res = await api.getSearches(50, 0);
+        if (res.ok && res.data.searches) {
+          console.log(`[CloudSync] Loaded ${res.data.searches.length} history items from cloud`);
+          res.data.searches.forEach(s => items.push({ ...s, source: 'cloud' }));
+        } else {
+          console.warn('[CloudSync] Failed to load history:', res.error);
+        }
+        // Load cloud resume states
+        console.log('[CloudSync] Loading resume states for history...');
+        const resumeRes = await api.getResumeStates();
+        if (resumeRes.ok && resumeRes.data.resumeStates?.length > 0) {
+          console.log(`[CloudSync] Found ${resumeRes.data.resumeStates.length} cloud resume states`);
+          for (const rs of resumeRes.data.resumeStates) {
+            items.push({
+              id: rs.id,
+              query: rs.query,
+              mode: rs.mode,
+              result_count: rs.result_count,
+              created_at: rs.updated_at || rs.created_at,
+              source: 'cloud',
+              status: 'paused',
+              _resumeState: typeof rs.resume_state === 'string' ? JSON.parse(rs.resume_state) : rs.resume_state,
+              _partialResults: rs.partial_results ? (typeof rs.partial_results === 'string' ? JSON.parse(rs.partial_results) : rs.partial_results) : [],
+            });
+          }
+        }
+      }
+      // Load local resume state
+      const localResume = localStorage.getItem('mergex_resume_state');
+      if (localResume) {
+        try {
+          const parsed = JSON.parse(localResume);
+          console.log(`[CloudSync] Found local resume state: "${parsed.query}"`);
+          // Avoid duplicate if cloud already has same query
+          const isDupe = items.some(i => i.status === 'paused' && i.query === parsed.query);
+          if (!isDupe) {
+            items.push({
+              id: 'local_resume',
+              query: parsed.query,
+              mode: parsed.mode,
+              result_count: parsed.resultCount || 0,
+              created_at: parsed.timestamp,
+              source: 'local',
+              status: 'paused',
+              _resumeState: parsed.resumeState,
+              _partialResults: parsed.partialResults || [],
+            });
+          }
+        } catch { /* ignore */ }
+      }
+      // Sort by most recent first
+      items.sort((a, b) => {
+        const ta = new Date(a.created_at || 0).getTime();
+        const tb = new Date(b.created_at || 0).getTime();
+        return tb - ta;
+      });
+      this.historyItems = items;
+    },
+    async refreshHistory(event) {
+      await this.loadHistory();
+      event?.target?.complete();
+    },
+    async loadHistoryItem(item) {
+      if (item.source === 'cloud' && item.id) {
+        this.syncStatus = 'syncing';
+        const res = await api.getSearch(item.id);
+        this.syncStatus = 'idle';
+        if (res.ok) {
+          this.row_datas = (res.data.results || []).map(r => ({
+            title: r.title || '',
+            cid: r.cid || '',
+            stars: r.stars || 0,
+            reviews: r.reviews || 0,
+            category: r.category || '',
+            address: r.address || '',
+            completePhoneNumber: r.complete_phone_number || r.completePhoneNumber || '',
+            url: r.url || '',
+          }));
+          this.input = item.query;
+          this.resultSource = 'cloud';
+          this.viewStack.push(this.view);
+          this.view = 'results';
+          return;
+        }
+      }
+      // fallback: try cache
+      const cached = getCachedSearch(item.query, item.mode || 'normal');
+      if (cached) {
+        this.row_datas = cached.results;
+        this.input = item.query;
+        this.resultSource = 'cache';
+        this.viewStack.push(this.view);
+        this.view = 'results';
+      }
+    },
+    async showHistoryInfo() {
+      const alert = await alertController.create({
+        header: 'Search History',
+        message: 'Your searches are saved here for quick access.\n\nCompleted searches (green dot) have all results collected and ready to export.\n\nPartial searches (amber dot) were stopped before finishing. You can tap them to preview what was found, or hit the green play icon to pick up right where it left off — no data is lost.',
+        buttons: ['Got it'],
+      });
+      await alert.present();
+    },
+    viewPausedResults(item) {
+      console.log(`[CloudSync] Viewing partial results for "${item.query}" (${item.result_count} leads)`);
+      this.row_datas = (item._partialResults || []).map(r => ({
+        title: r.title || '',
+        cid: r.cid || '',
+        stars: r.stars || 0,
+        reviews: r.reviews || 0,
+        category: r.category || '',
+        address: r.address || '',
+        completePhoneNumber: r.complete_phone_number || r.completePhoneNumber || '',
+        url: r.url || '',
+      }));
+      this.input = item.query;
+      this.searchMode = item.mode || 'normal';
+      this.resultSource = 'cache';
+      this.viewStack.push(this.view);
+      this.view = 'results';
+    },
+    async resumeFromHistory(item) {
+      console.log(`[CloudSync] Resuming from history — source: ${item.source}, query: "${item.query}", ${item.result_count || 0} partial results`);
+      this.input = item.query;
+      this.searchMode = item.mode || 'normal';
+      this.resumeState = item._resumeState;
+      if (item._partialResults?.length) {
+        this.row_datas = item._partialResults;
+        console.log(`[CloudSync] Restored ${this.row_datas.length} partial results`);
+      }
+      // Clean up the resume state
+      if (item.source === 'cloud' && item.id && item.id !== 'local_resume') {
+        console.log(`[CloudSync] Deleting consumed cloud resume state: ${item.id}`);
+        await api.deleteResumeState(item.id);
+      }
+      localStorage.removeItem('mergex_resume_state');
+      this.historyItems = this.historyItems.filter(h => h !== item);
+      this.searchCancelled = false;
+      await this.doSearch();
+    },
+    async deleteHistoryItem(item) {
+      const alert = await alertController.create({
+        header: 'Delete Search',
+        message: `Delete "${item.query}" from history?`,
+        buttons: [
+          { text: 'Cancel', role: 'cancel' },
+          {
+            text: 'Delete',
+            handler: async () => {
+              if (item.status === 'paused') {
+                // Delete resume state
+                if (item.source === 'cloud' && item.id && item.id !== 'local_resume') {
+                  await api.deleteResumeState(item.id);
+                }
+                if (item.source === 'local' || item.id === 'local_resume') {
+                  localStorage.removeItem('mergex_resume_state');
+                }
+              } else if (item.source === 'cloud' && item.id) {
+                await api.deleteSearch(item.id);
+              }
+              this.historyItems = this.historyItems.filter(h => h !== item);
+            },
+          },
+        ],
+      });
+      await alert.present();
+    },
+    // ─── Settings actions ────────────────────────────────────────────────
+    async clearLocalCache() {
+      const alert = await alertController.create({
+        header: 'Clear Cache',
+        message: `Delete ${this.cacheCount} cached searches?`,
+        buttons: [
+          { text: 'Cancel', role: 'cancel' },
+          {
+            text: 'Clear',
+            handler: () => {
+              clearAllCache();
+              this.cacheCount = 0;
+              toastController.create({ message: 'Cache cleared', duration: 2000, position: 'bottom', color: 'success' }).then(t => t.present());
+            },
+          },
+        ],
+      });
+      await alert.present();
+    },
+    // ─── Resume (handled in history tab) ───────────────────────────────
     async doSearch() {
       if (!this.input.trim()) {
         this.shaking = true;
@@ -839,8 +1353,122 @@ export default {
         return;
       }
 
+      // If input changed from a previous resume, clear resume state
+      if (this.resumeState && this.resumeState._query && this.resumeState._query !== this.input.trim()) {
+        this.resumeState = null;
+      }
+
+      // Track navigation so back button returns correctly
+      if (this.view !== 'results') {
+        this.viewStack.push(this.view);
+      }
+
+      this.resultSource = null;
+
+      // ── Phase 6: Check local cache first ──
+      if (!this.resumeState) {
+        const cached = getCachedSearch(this.input, this.searchMode);
+        if (cached) {
+          this.row_datas = cached.results;
+          this.resultSource = 'cache';
+          this.view = 'results';
+          const toast = await toastController.create({
+            message: `Loaded ${cached.results.length} cached leads`, duration: 2000, position: 'bottom', color: 'dark',
+          });
+          await toast.present();
+          return;
+        }
+      }
+
+      // ── Phase 3: CloudSync — check cloud before scraping ──
+      if (this.cloudSyncEnabled && !this.resumeState) {
+        console.log(`[CloudSync] Phase 3: Checking cloud for existing results — query="${this.input}", mode="${this.searchMode}"`);
+        this.syncStatus = 'syncing';
+        try {
+          // Exact match
+          console.log('[CloudSync] Looking for exact match...');
+          const matchRes = await api.matchSearch(this.input, this.searchMode);
+          if (matchRes.ok && matchRes.data.match) {
+            const { search: matchedSearch, results } = matchRes.data.match;
+            this.row_datas = (results || []).map(r => ({
+              title: r.title || '',
+              cid: r.cid || '',
+              stars: r.stars || 0,
+              reviews: r.reviews || 0,
+              category: r.category || '',
+              address: r.address || '',
+              completePhoneNumber: r.complete_phone_number || r.completePhoneNumber || '',
+              url: r.url || '',
+            }));
+            this.resultSource = 'cloud';
+            this.syncStatus = 'synced';
+            this.view = 'results';
+            setCachedSearch(this.input, this.searchMode, this.row_datas);
+            console.log(`[CloudSync] Exact match found! Loaded ${this.row_datas.length} leads from cloud (search id: ${matchedSearch?.id})`);
+            const toast = await toastController.create({
+              message: `Loaded ${this.row_datas.length} leads from cloud`, duration: 2000, position: 'bottom', color: 'dark',
+            });
+            await toast.present();
+            return;
+          }
+
+          // Similar search
+          console.log('[CloudSync] No exact match, looking for similar searches...');
+          const simRes = await api.findSimilar(this.input);
+          if (simRes.ok && simRes.data.similar?.length > 0) {
+            console.log(`[CloudSync] Found ${simRes.data.similar.length} similar searches:`, simRes.data.similar.map(s => `"${s.query}" (${s.result_count} leads)`));
+            const useSimilar = await new Promise(resolve => {
+              const items = simRes.data.similar.slice(0, 3);
+              alertController.create({
+                header: 'Similar Searches Found',
+                message: items.map(s => `"${s.query}" (${s.result_count} leads)`).join('\n'),
+                buttons: [
+                  { text: 'Search Fresh', role: 'cancel', handler: () => resolve(null) },
+                  ...items.map(s => ({
+                    text: `Use "${s.query}"`,
+                    handler: () => resolve(s),
+                  })),
+                ],
+              }).then(a => a.present());
+            });
+
+            if (useSimilar) {
+              console.log(`[CloudSync] User chose similar search: "${useSimilar.query}" (id: ${useSimilar.id})`);
+              const fullRes = await api.getSearch(useSimilar.id);
+              if (fullRes.ok) {
+                this.row_datas = (fullRes.data.results || []).map(r => ({
+                  title: r.title || '',
+                  cid: r.cid || '',
+                  stars: r.stars || 0,
+                  reviews: r.reviews || 0,
+                  category: r.category || '',
+                  address: r.address || '',
+                  completePhoneNumber: r.complete_phone_number || r.completePhoneNumber || '',
+                  url: r.url || '',
+                }));
+                this.resultSource = 'cloud';
+                this.syncStatus = 'synced';
+                this.view = 'results';
+                console.log(`[CloudSync] Loaded ${this.row_datas.length} leads from similar search`);
+                return;
+              }
+            } else {
+              console.log('[CloudSync] User chose to search fresh, skipping similar results');
+            }
+          } else {
+            console.log('[CloudSync] No similar searches found');
+          }
+          console.log('[CloudSync] No cloud results available, proceeding to scrape');
+          this.syncStatus = 'idle';
+        } catch (err) {
+          console.error('[CloudSync] Cloud check failed, falling back to scrape:', err);
+          this.syncStatus = 'offline';
+        }
+      }
+
+      // ── Original scraping flow ──
       // Show long mode confirmation
-      if (this.searchMode === 'long') {
+      if (this.searchMode === 'long' && !this.resumeState) {
         const confirmed = await new Promise(resolve => {
           alertController.create({
             header: 'Deep Search (In Development)',
@@ -882,36 +1510,87 @@ export default {
         this.row_datas = searchResult.results;
         this.resumeState = searchResult.resumeState;
 
-        // TODO: Save to search history
-        // const history = JSON.parse(localStorage.getItem('mergex_search_history') || '[]');
-        // history.unshift({ query: this.input, resultCount: this.row_datas.length, timestamp: Date.now(), mode: this.searchMode });
-        // localStorage.setItem('mergex_search_history', JSON.stringify(history.slice(0, 8)));
-
         if (this.searchCancelled) {
+          // ── Phase 5: Save resume state on pause ──
+          console.log(`[CloudSync] Search paused — saving resume state (${this.row_datas.length} leads, phase: ${this.resumeState?.phase || 'unknown'})`);
+          const resumeData = {
+            query: this.input,
+            mode: this.searchMode,
+            resumeState: this.resumeState,
+            partialResults: this.row_datas,
+            resultCount: this.row_datas.length,
+            timestamp: Date.now(),
+          };
+          // Save to localStorage as backup
+          localStorage.setItem('mergex_resume_state', JSON.stringify(resumeData));
+          console.log(`[CloudSync] Resume state saved to localStorage (${JSON.stringify(resumeData).length} bytes)`);
+          // Save to cloud
+          if (this.cloudSyncEnabled) {
+            try {
+              console.log(`[CloudSync] Saving resume state to cloud — query="${this.input}", ${this.row_datas.length} results, deviceId=${this.deviceId}`);
+              await api.saveResumeState({
+                query: this.input,
+                mode: this.searchMode,
+                resumeState: JSON.stringify(this.resumeState),
+                partialResults: JSON.stringify(this.row_datas),
+                resultCount: this.row_datas.length,
+                deviceId: this.deviceId,
+              });
+              console.log('[CloudSync] Resume state saved to cloud successfully');
+            } catch (err) {
+              console.warn('[CloudSync] Failed to save resume state to cloud:', err);
+            }
+          }
+
           const toast = await toastController.create({
-            message: `Search paused. Found ${this.row_datas.length} leads so far.`, duration: 3000, position: 'bottom', color: 'warning',
+            message: `Search paused. Found ${this.row_datas.length} leads so far. Resume anytime, even on another device.`,
+            duration: 4000, position: 'bottom', color: 'warning',
           });
           await toast.present();
           if (this.row_datas.length > 0) this.view = 'results';
-        } else if (Capacitor.isNativePlatform() && this.notificationsGranted) {
-          try {
-            const notifId = Math.floor(Math.random() * 2147483646) + 1;
-            await LocalNotifications.schedule({
-              notifications: [{
-                title: 'Leads Ready',
-                body: `Found ${this.row_datas.length} leads for "${this.input}"`,
-                id: notifId,
-                channelId: 'search-updates',
-                smallIcon: 'ic_notification',
-                autoCancel: true,
-              }],
-            });
-          } catch (notifErr) {
-            console.error('[NOTIF] Failed:', notifErr);
-          }
-        }
+        } else {
+          // Search completed — clear resume state
+          console.log(`[CloudSync] Search completed — ${this.row_datas.length} results. Clearing resume state.`);
+          this.resumeState = null;
+          localStorage.removeItem('mergex_resume_state');
 
-        if (!this.searchCancelled) {
+          // ── Auto-save to cloud ──
+          if (this.cloudSyncEnabled && this.row_datas.length > 0) {
+            console.log(`[CloudSync] Auto-saving ${this.row_datas.length} results to cloud — query="${this.input}", mode="${this.searchMode}"`);
+            this.syncStatus = 'syncing';
+            try {
+              await api.saveSearch(this.input, this.searchMode, this.row_datas);
+              this.syncStatus = 'synced';
+              console.log('[CloudSync] Results saved to cloud successfully');
+            } catch (err) {
+              console.error('[CloudSync] Failed to save results to cloud:', err);
+              this.syncStatus = 'error';
+            }
+          }
+
+          // ── Save to local cache ──
+          if (this.row_datas.length > 0) {
+            setCachedSearch(this.input, this.searchMode, this.row_datas);
+          }
+
+          if (Capacitor.isNativePlatform() && this.notificationsGranted) {
+            try {
+              const notifId = Math.floor(Math.random() * 2147483646) + 1;
+              await LocalNotifications.schedule({
+                notifications: [{
+                  title: 'Leads Ready',
+                  body: `Found ${this.row_datas.length} leads for "${this.input}"`,
+                  id: notifId,
+                  channelId: 'search-updates',
+                  smallIcon: 'ic_notification',
+                  autoCancel: true,
+                }],
+              });
+            } catch (notifErr) {
+              console.error('[NOTIF] Failed:', notifErr);
+            }
+          }
+
           if (this.row_datas.length > 0) {
             this.view = 'results';
           } else {
@@ -1318,6 +1997,7 @@ export default {
   position: sticky;
   top: 0;
   z-index: 10;
+  margin-bottom: 12px;
 }
 .filter-search {
   flex: 1;
@@ -1563,30 +2243,270 @@ export default {
   color: #f0f0f0;
 }
 
-/* Footer */
-.footer-toolbar {
-  --background: #0F0F0F;
-  --border-color: #1A1A1A;
+/* Bottom Navigation */
+.bottom-nav {
+  display: flex;
+  justify-content: space-around;
+  background: #0F0F0F;
+  border-top: 1px solid #1A1A1A;
+  padding: 6px 0 env(safe-area-inset-bottom, 6px);
 }
-.footer-content {
+.bottom-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 16px;
+  background: none;
+  border: none;
+  color: #666;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.bottom-nav-item ion-icon {
+  font-size: 22px;
+}
+.bottom-nav-item.active {
+  color: #E8FF00;
+}
+
+/* Sync indicator */
+.sync-indicator {
+  --color: #666;
+}
+.sync-synced { --color: #4ade80; }
+.sync-syncing { --color: #E8FF00; }
+.sync-offline { --color: #888; }
+.sync-error { --color: #ef4444; }
+.spin-icon {
+  animation: spin 1s linear infinite;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* History View */
+.history-view, .settings-view {
+  padding: 16px;
+  padding-bottom: 80px;
+}
+.view-header {
+  margin-bottom: 4px;
+}
+.view-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.view-header h2 {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.3px;
+}
+.header-info-btn {
+  background: none;
+  border: none;
+  color: #555;
+  font-size: 18px;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.header-info-btn:active {
+  color: #aaa;
+}
+.empty-state {
+  text-align: center;
+  padding: 60px 16px;
+  color: #666;
+}
+.empty-icon {
+  font-size: 48px;
+  color: #333;
+  margin-bottom: 12px;
+}
+.empty-state h3 {
+  font-size: 16px;
+  color: #888;
+  margin: 0 0 6px;
+}
+.empty-state p {
+  font-size: 13px;
+  margin: 0;
+}
+.history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.history-item {
+  display: flex;
+  align-items: center;
+  padding: 12px;
+  background: #1A1A1A;
+  border-radius: 10px;
+  border: 1px solid #222;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  gap: 10px;
+}
+.history-item:active {
+  background: #222;
+}
+.history-item--paused {
+  border-color: rgba(255, 170, 0, 0.25);
+}
+.history-item-left {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+}
+.history-item-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.history-item-status-dot.dot-green {
+  background: #4ade80;
+}
+.history-item-status-dot.dot-amber {
+  background: #f59e0b;
+}
+.history-item-body {
+  min-width: 0;
+  flex: 1;
+}
+.history-item-query {
+  font-size: 14px;
+  font-weight: 600;
+  color: #eee;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 3px;
+  line-height: 1.3;
+}
+.history-item-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 11px;
+  color: #777;
+  line-height: 1.4;
+}
+.history-meta-sep {
+  color: #444;
+}
+.history-tag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #252525;
+  color: #777;
+}
+.history-tag--fast { color: #22d3ee; background: rgba(34, 211, 238, 0.1); }
+.history-tag--normal { color: #a3e635; background: rgba(163, 230, 53, 0.1); }
+.history-tag--long { color: #fb923c; background: rgba(251, 146, 60, 0.1); }
+.history-tag--partial { color: #fbbf24; background: rgba(251, 191, 36, 0.1); }
+.history-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.history-action-btn {
+  background: none;
+  border: none;
+  padding: 6px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 8px 0;
-  font-size: 12px;
+  cursor: pointer;
+  font-size: 20px;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
 }
-.footer-brand {
-  font-weight: 700;
-  color: #E8FF00;
+.history-action-btn:active {
+  background: rgba(255, 255, 255, 0.06);
 }
-.footer-dot {
-  color: #444;
+.history-action-btn--resume {
+  color: #4ade80;
 }
-.footer-text {
+.history-action-btn--delete {
   color: #666;
-  font-style: italic;
 }
+.history-action-btn--delete:active {
+  color: #ef4444;
+}
+.history-source-icon {
+  font-size: 15px;
+  color: #444;
+  padding: 6px;
+}
+
+/* Settings View */
+.settings-section {
+  margin-bottom: 24px;
+}
+.settings-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #E8FF00;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin: 0 0 10px;
+}
+.settings-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: #1A1A1A;
+  border-radius: 12px;
+  border: 1px solid #252525;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+.settings-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.settings-item-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #f0f0f0;
+}
+.settings-item-desc {
+  font-size: 12px;
+  color: #888;
+}
+.api-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dot-green { background: #4ade80; }
+.dot-red { background: #ef4444; }
+.dot-yellow { background: #fbbf24; }
+.dot-gray { background: #555; }
 
 /* Info Modal */
 .info-content {

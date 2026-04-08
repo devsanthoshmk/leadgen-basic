@@ -1,0 +1,54 @@
+[
+  {
+    "iterationIndex": 0,
+    "results": [
+      {
+        "test": {
+          "filename": "Save Search.bru"
+        },
+        "request": {
+          "method": null,
+          "url": null,
+          "headers": null,
+          "data": null
+        },
+        "response": {
+          "status": "skipped",
+          "statusText": "Line 7, col 1:\n  6 | \n> 7 | request {\n      ^\n  8 |   method: POST\nExpected end of input, \"example\", \"docs\", \"settings\", \"tests\", \"script:post-response\", \"script:pre-request\", \"assert\", \"vars:post-response\", \"vars:pre-request\", \"body:ws\", \"body:grpc\", \"body\", \"body:file\", \"body:multipart-form\", \"body:form-urlencoded\", \"body:graphql:vars\", \"body:graphql\", \"body:sparql\", \"body:xml\", \"body:text\", \"body:json\", \"auth:oauth2:additional_params:refresh_token_req:body\", \"auth:oauth2:additional_params:refresh_token_req:queryparams\", \"auth:oauth2:additional_params:refresh_token_req:headers\", \"auth:oauth2:additional_params:access_token_req:body\", \"auth:oauth2:additional_params:access_token_req:queryparams\", \"auth:oauth2:additional_params:access_token_req:headers\", \"auth:oauth2:additional_params:auth_req:queryparams\", \"auth:oauth2:additional_params:auth_req:headers\", \"auth:apikey\", \"auth:wsse\", \"auth:oauth2\", \"auth:ntlm\", \"auth:digest\", \"auth:bearer\", \"auth:basic\", \"auth:awsv4\", \"metadata\", \"headers\", \"params:query\", \"params:path\", \"query\", \"ws\", \"grpc\", \"http\", \"trace\", \"connect\", \"head\", \"options\", \"patch\", \"delete\", \"put\", \"post\", \"get\", or \"meta\"",
+          "data": null,
+          "responseTime": 0
+        },
+        "error": "Line 7, col 1:\n  6 | \n> 7 | request {\n      ^\n  8 |   method: POST\nExpected end of input, \"example\", \"docs\", \"settings\", \"tests\", \"script:post-response\", \"script:pre-request\", \"assert\", \"vars:post-response\", \"vars:pre-request\", \"body:ws\", \"body:grpc\", \"body\", \"body:file\", \"body:multipart-form\", \"body:form-urlencoded\", \"body:graphql:vars\", \"body:graphql\", \"body:sparql\", \"body:xml\", \"body:text\", \"body:json\", \"auth:oauth2:additional_params:refresh_token_req:body\", \"auth:oauth2:additional_params:refresh_token_req:queryparams\", \"auth:oauth2:additional_params:refresh_token_req:headers\", \"auth:oauth2:additional_params:access_token_req:body\", \"auth:oauth2:additional_params:access_token_req:queryparams\", \"auth:oauth2:additional_params:access_token_req:headers\", \"auth:oauth2:additional_params:auth_req:queryparams\", \"auth:oauth2:additional_params:auth_req:headers\", \"auth:apikey\", \"auth:wsse\", \"auth:oauth2\", \"auth:ntlm\", \"auth:digest\", \"auth:bearer\", \"auth:basic\", \"auth:awsv4\", \"metadata\", \"headers\", \"params:query\", \"params:path\", \"query\", \"ws\", \"grpc\", \"http\", \"trace\", \"connect\", \"head\", \"options\", \"patch\", \"delete\", \"put\", \"post\", \"get\", or \"meta\"",
+        "status": "skipped",
+        "skipped": true,
+        "assertionResults": [],
+        "testResults": [],
+        "preRequestTestResults": [],
+        "postResponseTestResults": [],
+        "runDuration": 0,
+        "suitename": "Save Search",
+        "name": "Save Search.bru",
+        "path": "Save Search.bru"
+      }
+    ],
+    "summary": {
+      "totalRequests": 1,
+      "passedRequests": 0,
+      "failedRequests": 0,
+      "errorRequests": 0,
+      "skippedRequests": 1,
+      "totalAssertions": 0,
+      "passedAssertions": 0,
+      "failedAssertions": 0,
+      "totalTests": 0,
+      "passedTests": 0,
+      "failedTests": 0,
+      "totalPreRequestTests": 0,
+      "passedPreRequestTests": 0,
+      "failedPreRequestTests": 0,
+      "totalPostResponseTests": 0,
+      "passedPostResponseTests": 0,
+      "failedPostResponseTests": 0
+    }
+  }
+]

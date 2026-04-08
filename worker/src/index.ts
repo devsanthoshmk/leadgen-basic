@@ -2,12 +2,8 @@
  * Mergex LeadGen API Worker
  *
  * Stores Google Local Listings search results in Cloudflare D1.
- * Provides endpoints to:
- *   - Save search results        POST   /searches
- *   - Autocomplete search terms   GET   /searches/autocomplete?q=...
- *   - Get results by search ID    GET   /searches/:id/results
- *   - Get both (term + results)   GET   /searches/:id
- *   - List all searches           GET   /searches
+ * Provides endpoints for search storage, cloud sync matching,
+ * cross-device resumability, and history management.
  *
  * Auth: pass `?password=mergex-leadgen` or header `Authorization: Bearer mergex-leadgen`
  */
@@ -32,7 +28,10 @@ function isAuthorized(request: Request): boolean {
 }
 
 function unauthorized(): Response {
-	return Response.json({ error: "Unauthorized. Pass ?password=mergex-leadgen or Authorization: Bearer mergex-leadgen" }, { status: 401 });
+	return Response.json(
+		{ error: "Unauthorized. Pass ?password=mergex-leadgen or Authorization: Bearer mergex-leadgen" },
+		{ status: 401 }
+	);
 }
 
 // ─── CORS ────────────────────────────────────────────────────────────────────
@@ -40,7 +39,7 @@ function unauthorized(): Response {
 function corsHeaders(): HeadersInit {
 	return {
 		"Access-Control-Allow-Origin": "*",
-		"Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+		"Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
 		"Access-Control-Allow-Headers": "Content-Type, Authorization",
 	};
 }
@@ -61,6 +60,7 @@ async function ensureTables(db: D1Database) {
 				id         INTEGER PRIMARY KEY AUTOINCREMENT,
 				query      TEXT    NOT NULL,
 				mode       TEXT    DEFAULT 'normal',
+				result_count INTEGER DEFAULT 0,
 				created_at TEXT    DEFAULT (datetime('now'))
 			)
 		`),
@@ -79,8 +79,23 @@ async function ensureTables(db: D1Database) {
 				FOREIGN KEY (search_id) REFERENCES searches(id)
 			)
 		`),
+		db.prepare(`
+			CREATE TABLE IF NOT EXISTS resume_states (
+				id              INTEGER PRIMARY KEY AUTOINCREMENT,
+				query           TEXT    NOT NULL,
+				mode            TEXT    DEFAULT 'normal',
+				resume_state    TEXT    NOT NULL,
+				partial_results TEXT,
+				result_count    INTEGER DEFAULT 0,
+				device_id       TEXT,
+				created_at      TEXT    DEFAULT (datetime('now')),
+				updated_at      TEXT    DEFAULT (datetime('now'))
+			)
+		`),
 		db.prepare(`CREATE INDEX IF NOT EXISTS idx_results_search ON results(search_id)`),
 		db.prepare(`CREATE INDEX IF NOT EXISTS idx_searches_query ON searches(query)`),
+		db.prepare(`CREATE INDEX IF NOT EXISTS idx_searches_query_mode ON searches(query, mode)`),
+		db.prepare(`CREATE INDEX IF NOT EXISTS idx_resume_device ON resume_states(device_id)`),
 	]);
 }
 
@@ -89,7 +104,6 @@ async function ensureTables(db: D1Database) {
 /**
  * POST /searches
  * Body: { query: string, mode?: string, results: Result[] }
- * Saves a search and its results. Returns the search id.
  */
 async function handleSaveSearch(request: Request, db: D1Database): Promise<Response> {
 	let body: any;
@@ -104,15 +118,13 @@ async function handleSaveSearch(request: Request, db: D1Database): Promise<Respo
 		return json({ error: "Body must have `query` (string) and `results` (array)" }, 400);
 	}
 
-	// Insert search row
 	const searchResult = await db
-		.prepare("INSERT INTO searches (query, mode) VALUES (?, ?) RETURNING id")
-		.bind(query, mode ?? "normal")
+		.prepare("INSERT INTO searches (query, mode, result_count) VALUES (?, ?, ?) RETURNING id")
+		.bind(query, mode ?? "normal", results.length)
 		.first<{ id: number }>();
 
 	const searchId = searchResult!.id;
 
-	// Batch-insert results (D1 batch limit is 100 statements, chunk if needed)
 	const stmts = results.map((r: any) =>
 		db
 			.prepare(
@@ -132,7 +144,6 @@ async function handleSaveSearch(request: Request, db: D1Database): Promise<Respo
 			)
 	);
 
-	// D1 batch can handle up to 100 statements; chunk for safety
 	for (let i = 0; i < stmts.length; i += 90) {
 		await db.batch(stmts.slice(i, i + 90));
 	}
@@ -141,8 +152,78 @@ async function handleSaveSearch(request: Request, db: D1Database): Promise<Respo
 }
 
 /**
+ * GET /searches/match?q=...&mode=...
+ * Exact match lookup: returns the most recent search with identical query+mode and its results.
+ */
+async function handleMatchSearch(url: URL, db: D1Database): Promise<Response> {
+	const q = url.searchParams.get("q") ?? "";
+	const mode = url.searchParams.get("mode") ?? "normal";
+
+	if (!q) return json({ error: "Query parameter `q` is required" }, 400);
+
+	const search = await db
+		.prepare("SELECT * FROM searches WHERE LOWER(query) = LOWER(?) AND mode = ? ORDER BY created_at DESC LIMIT 1")
+		.bind(q, mode)
+		.first();
+
+	if (!search) {
+		return json({ match: null });
+	}
+
+	const results = await db
+		.prepare("SELECT * FROM results WHERE search_id = ? ORDER BY id")
+		.bind(search.id)
+		.all();
+
+	return json({ match: { search, results: results.results } });
+}
+
+/**
+ * GET /searches/similar?q=...&limit=5
+ * Fuzzy match: returns searches whose query contains the search term.
+ */
+async function handleSimilarSearches(url: URL, db: D1Database): Promise<Response> {
+	const q = url.searchParams.get("q") ?? "";
+	const limit = Math.min(Number(url.searchParams.get("limit") ?? 5), 20);
+
+	if (!q) return json({ error: "Query parameter `q` is required" }, 400);
+
+	// Split query into words and match any that contain the key terms
+	const words = q.trim().toLowerCase().split(/\s+/).filter(w => w.length > 2);
+	if (words.length === 0) return json({ similar: [] });
+
+	// Use LIKE with the full query first, then individual significant words
+	const rows = await db
+		.prepare(
+			`SELECT id, query, mode, result_count, created_at FROM searches
+			 WHERE LOWER(query) LIKE ? AND LOWER(query) != LOWER(?)
+			 ORDER BY created_at DESC
+			 LIMIT ?`
+		)
+		.bind(`%${q}%`, q, limit)
+		.all();
+
+	// If not enough results, try matching individual words
+	let similar = rows.results;
+	if (similar.length < limit && words.length > 0) {
+		const mainWord = words.reduce((a, b) => a.length > b.length ? a : b);
+		const moreRows = await db
+			.prepare(
+				`SELECT id, query, mode, result_count, created_at FROM searches
+				 WHERE LOWER(query) LIKE ? AND LOWER(query) != LOWER(?) AND LOWER(query) NOT LIKE ?
+				 ORDER BY created_at DESC
+				 LIMIT ?`
+			)
+			.bind(`%${mainWord}%`, q, `%${q}%`, limit - similar.length)
+			.all();
+		similar = [...similar, ...moreRows.results];
+	}
+
+	return json({ similar });
+}
+
+/**
  * GET /searches/autocomplete?q=...
- * Returns distinct search terms matching the prefix (for autocomplete).
  */
 async function handleAutocomplete(url: URL, db: D1Database): Promise<Response> {
 	const q = url.searchParams.get("q") ?? "";
@@ -163,7 +244,6 @@ async function handleAutocomplete(url: URL, db: D1Database): Promise<Response> {
 
 /**
  * GET /searches/:id/results
- * Returns results array for a given search id.
  */
 async function handleGetResults(searchId: number, db: D1Database): Promise<Response> {
 	const results = await db
@@ -179,7 +259,6 @@ async function handleGetResults(searchId: number, db: D1Database): Promise<Respo
 
 /**
  * GET /searches/:id
- * Returns the search metadata AND its results.
  */
 async function handleGetSearch(searchId: number, db: D1Database): Promise<Response> {
 	const search = await db
@@ -201,10 +280,9 @@ async function handleGetSearch(searchId: number, db: D1Database): Promise<Respon
 
 /**
  * GET /searches
- * Lists all searches (most recent first). Pagination via ?limit=&offset=.
  */
 async function handleListSearches(url: URL, db: D1Database): Promise<Response> {
-	const limit = Math.min(Number(url.searchParams.get("limit") ?? 20), 100);
+	const limit = Math.min(Number(url.searchParams.get("limit") ?? 50), 200);
 	const offset = Number(url.searchParams.get("offset") ?? 0);
 
 	const rows = await db
@@ -213,6 +291,94 @@ async function handleListSearches(url: URL, db: D1Database): Promise<Response> {
 		.all();
 
 	return json({ searches: rows.results });
+}
+
+/**
+ * DELETE /searches/:id
+ */
+async function handleDeleteSearch(searchId: number, db: D1Database): Promise<Response> {
+	const search = await db.prepare("SELECT id FROM searches WHERE id = ?").bind(searchId).first();
+	if (!search) return json({ error: "Search not found" }, 404);
+
+	await db.batch([
+		db.prepare("DELETE FROM results WHERE search_id = ?").bind(searchId),
+		db.prepare("DELETE FROM searches WHERE id = ?").bind(searchId),
+	]);
+
+	return json({ deleted: true, id: searchId });
+}
+
+/**
+ * POST /resume
+ * Body: { query, mode, resumeState, partialResults, resultCount, deviceId }
+ */
+async function handleSaveResume(request: Request, db: D1Database): Promise<Response> {
+	let body: any;
+	try {
+		body = await request.json();
+	} catch {
+		return json({ error: "Invalid JSON body" }, 400);
+	}
+
+	const { query, mode, resumeState, partialResults, resultCount, deviceId } = body;
+	if (!query || !resumeState) {
+		return json({ error: "Body must have `query` and `resumeState`" }, 400);
+	}
+
+	// Upsert: delete existing resume for same query+device, then insert
+	if (deviceId) {
+		await db
+			.prepare("DELETE FROM resume_states WHERE query = ? AND device_id = ?")
+			.bind(query, deviceId)
+			.run();
+	}
+
+	const row = await db
+		.prepare(
+			`INSERT INTO resume_states (query, mode, resume_state, partial_results, result_count, device_id)
+			 VALUES (?, ?, ?, ?, ?, ?) RETURNING id`
+		)
+		.bind(
+			query,
+			mode ?? "normal",
+			typeof resumeState === "string" ? resumeState : JSON.stringify(resumeState),
+			partialResults ? (typeof partialResults === "string" ? partialResults : JSON.stringify(partialResults)) : null,
+			resultCount ?? 0,
+			deviceId ?? null
+		)
+		.first<{ id: number }>();
+
+	return json({ id: row!.id }, 201);
+}
+
+/**
+ * GET /resume
+ * Returns all pending resume states (optionally filtered by device_id).
+ */
+async function handleGetResume(url: URL, db: D1Database): Promise<Response> {
+	const deviceId = url.searchParams.get("device_id");
+
+	let rows;
+	if (deviceId) {
+		rows = await db
+			.prepare("SELECT * FROM resume_states WHERE device_id = ? ORDER BY updated_at DESC")
+			.bind(deviceId)
+			.all();
+	} else {
+		rows = await db
+			.prepare("SELECT * FROM resume_states ORDER BY updated_at DESC LIMIT 20")
+			.all();
+	}
+
+	return json({ resumeStates: rows.results });
+}
+
+/**
+ * DELETE /resume/:id
+ */
+async function handleDeleteResume(resumeId: number, db: D1Database): Promise<Response> {
+	await db.prepare("DELETE FROM resume_states WHERE id = ?").bind(resumeId).run();
+	return json({ deleted: true, id: resumeId });
 }
 
 // ─── Router ──────────────────────────────────────────────────────────────────
@@ -224,6 +390,14 @@ export default {
 			return new Response(null, { status: 204, headers: corsHeaders() });
 		}
 
+		const url = new URL(request.url);
+		const path = url.pathname;
+
+		// Health check (no auth required)
+		if (request.method === "GET" && path === "/health") {
+			return json({ status: "ok", timestamp: new Date().toISOString() });
+		}
+
 		// Auth check
 		if (!isAuthorized(request)) {
 			return unauthorized();
@@ -232,17 +406,30 @@ export default {
 		// Bootstrap tables on first request (idempotent)
 		await ensureTables(env.DB);
 
-		const url = new URL(request.url);
-		const path = url.pathname;
-
-		// POST /searches — save search + results
+		// POST /searches
 		if (request.method === "POST" && path === "/searches") {
 			return handleSaveSearch(request, env.DB);
+		}
+
+		// GET /searches/match?q=...&mode=...
+		if (request.method === "GET" && path === "/searches/match") {
+			return handleMatchSearch(url, env.DB);
+		}
+
+		// GET /searches/similar?q=...
+		if (request.method === "GET" && path === "/searches/similar") {
+			return handleSimilarSearches(url, env.DB);
 		}
 
 		// GET /searches/autocomplete?q=...
 		if (request.method === "GET" && path === "/searches/autocomplete") {
 			return handleAutocomplete(url, env.DB);
+		}
+
+		// DELETE /searches/:id
+		const deleteMatch = path.match(/^\/searches\/(\d+)$/);
+		if (request.method === "DELETE" && deleteMatch) {
+			return handleDeleteSearch(Number(deleteMatch[1]), env.DB);
 		}
 
 		// GET /searches/:id/results
@@ -257,20 +444,44 @@ export default {
 			return handleGetSearch(Number(searchMatch[1]), env.DB);
 		}
 
-		// GET /searches — list all
+		// GET /searches
 		if (request.method === "GET" && path === "/searches") {
 			return handleListSearches(url, env.DB);
+		}
+
+		// POST /resume
+		if (request.method === "POST" && path === "/resume") {
+			return handleSaveResume(request, env.DB);
+		}
+
+		// GET /resume
+		if (request.method === "GET" && path === "/resume") {
+			return handleGetResume(url, env.DB);
+		}
+
+		// DELETE /resume/:id
+		const resumeDelete = path.match(/^\/resume\/(\d+)$/);
+		if (request.method === "DELETE" && resumeDelete) {
+			return handleDeleteResume(Number(resumeDelete[1]), env.DB);
 		}
 
 		// Fallback
 		return json({
 			message: "Mergex LeadGen API",
+			version: "2.0.0",
 			endpoints: {
-				"POST /searches": "Save search results (body: {query, mode?, results[]})",
+				"GET /health": "Health check (no auth)",
+				"POST /searches": "Save search results",
 				"GET /searches": "List all searches",
+				"GET /searches/match?q=&mode=": "Exact match lookup",
+				"GET /searches/similar?q=": "Similar search lookup",
 				"GET /searches/autocomplete?q=": "Autocomplete search terms",
 				"GET /searches/:id": "Get search + results by id",
 				"GET /searches/:id/results": "Get only results by search id",
+				"DELETE /searches/:id": "Delete a search + results",
+				"POST /resume": "Save resume state",
+				"GET /resume": "Get pending resume states",
+				"DELETE /resume/:id": "Delete a resume state",
 			},
 		});
 	},
