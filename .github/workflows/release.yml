@@ -77,6 +77,21 @@ jobs:
           echo "::endgroup::"
           echo "✅ Dependencies installed"
 
+      - name: Prepare production API env
+        env:
+          RELEASE_VITE_API_URL: ${{ secrets.VITE_API_URL }}
+          RELEASE_VITE_API_PASSWORD: ${{ secrets.VITE_API_PASSWORD }}
+        run: |
+          API_URL="${RELEASE_VITE_API_URL:-https://leadgen-api.sanpro.workers.dev}"
+          API_PASSWORD="${RELEASE_VITE_API_PASSWORD:-mergex-leadgen}"
+
+          {
+            echo "VITE_API_URL=$API_URL"
+            echo "VITE_API_PASSWORD=$API_PASSWORD"
+          } > .env.production
+
+          echo "✅ .env.production created for release build"
+
       - name: Build web assets
         run: |
           echo "::group::vite build"

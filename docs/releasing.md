@@ -196,6 +196,8 @@ To enable signed releases, add these secrets in **GitHub → Settings → Secret
 | `ANDROID_KEYSTORE_PASSWORD` | Keystore password |
 | `ANDROID_KEY_ALIAS` | Key alias name |
 | `ANDROID_KEY_PASSWORD` | Key password |
+| `VITE_API_URL` | Cloud API base URL for release builds (optional; defaults to deployed worker URL) |
+| `VITE_API_PASSWORD` | API password for release builds (optional; defaults to `mergex-leadgen`) |
 
 ### Generate a keystore
 ```bash

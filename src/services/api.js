@@ -4,7 +4,25 @@
  * Reads VITE_API_URL and VITE_API_PASSWORD from environment.
  */
 
-const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8787').replace(/\/$/, '');
+import { Capacitor } from '@capacitor/core';
+
+const LOCAL_API_URL = 'http://localhost:8787';
+const DEFAULT_CLOUD_API_URL = 'https://leadgen-api.sanpro.workers.dev';
+
+function resolveApiUrl() {
+  const configured = import.meta.env.VITE_API_URL?.trim();
+  if (configured) return configured.replace(/\/$/, '');
+
+  // In packaged native apps (including GitHub Release APKs), localhost is not a valid backend.
+  // Fall back to the deployed Worker URL when VITE_API_URL is missing.
+  if (Capacitor.isNativePlatform()) {
+    return DEFAULT_CLOUD_API_URL;
+  }
+
+  return LOCAL_API_URL;
+}
+
+const API_URL = resolveApiUrl();
 const API_PASSWORD = import.meta.env.VITE_API_PASSWORD || 'mergex-leadgen';
 const TIMEOUT_MS = 15_000;
 
