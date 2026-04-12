@@ -29,7 +29,7 @@ function isAuthorized(request: Request): boolean {
 
 function unauthorized(): Response {
 	return Response.json(
-		{ error: "Unauthorized. Pass ?password=mergex-leadgen or Authorization: Bearer mergex-leadgen" },
+		{ error: "Unauthorized. Pass ?password=<PASSWORD> or Authorization: Bearer <PASSWORD>" },
 		{ status: 401 }
 	);
 }
