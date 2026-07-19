@@ -1,4 +1,4 @@
-# Mergex LeadGen - Places Data App
+# LeadGen sample
 
 A cross-platform mobile and web application that scrapes Google Places data and exports it to Excel. Built with Ionic Vue + Capacitor.
 
@@ -34,7 +34,7 @@ npm run export:android
 
 ## App Overview
 
-**Mergex LeadGen** lets users search for businesses/places, view detailed results with filtering and sorting, and export the data to Excel spreadsheets.
+**LeadGen** lets users search for businesses/places, view detailed results with filtering and sorting, and export the data to Excel spreadsheets.
 
 ### How It Works
 
@@ -50,3 +50,8 @@ npm run export:android
 - **Android** — Full functionality (scraping, notifications, background service, file export)
 - **iOS** — Full functionality (requires macOS + Xcode for building)
 - **Web Browser** — UI works, but scraping is blocked by CORS (no native HTTP bypass)
+
+
+# **Note:**
+This is not the complete application. The commits made after the previous ones have been moved to a private repository. If you need the enterprise version of this software, please contact me at **[connectwithsanthoshmk@gmail.com](mailto:connectwithsanthoshmk@gmail.com)** or on **WhatsApp** or **Instagram**: **@mksantho.sh**.
+
