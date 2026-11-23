@@ -4,53 +4,112 @@
 
 **File:** `src/services/scraper.js`
 
-### `search(query: string): Promise<Array>`
+### `search(query: string, mode?: string, onProgress?: function, resumeState?: object): Promise<{results: Array, resumeState: object|null}>`
 
 Main entry point. Scrapes Google Search for places matching the query.
 
 **Parameters:**
 - `query` — Search string (e.g., "restaurants in Chennai")
+- `mode` — Search mode: "fast" | "normal" | "long" (default: "normal")
+- `onProgress` — Progress callback function, return `false` to pause
+- `resumeState` — State object from a previous paused search
 
-**Returns:** Array of result objects, deduplicated.
+**Returns:** `{ results: Array, resumeState: object|null }`
+
+- `resumeState` is non-null if search was paused
+
+**Progress Callback:**
+Called with `{ phase, page, found, message }` during search phase, or `{ phase, current, total, message }` during enrich phase.
+
+Return `false` from callback to pause the search.
+
+**Resume State Object:**
+```javascript
+{
+  query: string,       // Original search query
+  mode: string,       // Search mode that was active
+  pagination: number, // Google pagination offset
+  phase: 'search' | 'enrich', // Which phase was interrupted
+  enrichIndex: number, // Index of next item to enrich
+  partialResults: Array, // Results collected so far
+}
+```
 
 **Result Object Shape:**
 ```javascript
 {
-  title: "Restaurant Name",        // string — business name
-  stars: 4.5,                       // number — rating (0 if not found)
-  reviews: 128,                     // number — review count (0 if not found)
-  category: "Indian Restaurant",    // string — business category
-  address: "123 Main St, City",     // string — full address
+  title: "Restaurant Name",      // string — business name
+  cid: "ABC123...",                // string — Google business ID
+  stars: 4.5,                    // number — rating (0 if not found)
+  reviews: 128,                   // number — review count (0 if not found)
+  category: "Indian Restaurant",   // string — business category
+  address: "123 Main St, City",  // string — full address
   completePhoneNumber: "+91 98765 43210", // string — validated phone number
-  url: "https://example.com"        // string — website URL
+  url: "https://example.com"      // string — website URL
 }
 ```
 
 **Behavior:**
-1. Constructs Google Search URL with `udm=1` parameter
-2. Fetches HTML with browser-like headers (Chrome User-Agent)
-3. Parses with `DOMParser` (browser-native, no jsdom dependency)
-4. Extracts data using CSS selectors (`.VkpGBb` containers)
-5. Validates phone numbers with `libphonenumber-js`
-6. Paginates (increments by 10) until no results found
-7. Returns deduplicated array
-
-**Error Handling:** Returns empty array on fetch failure. Errors logged to console.
+1. Checks local cache (24h TTL), returns if found
+2. Constructs Google Search URL with `udm=1` parameter
+3. Fetches HTML with browser-like headers (Chrome User-Agent)
+4. Parses with `DOMParser` (browser-native, no jsdom dependency)
+5. Extracts data using CSS selectors (`.VkpGBb` containers, `data-cid`)
+6. Deduplicates by CID or title+address
+7. Phase 2: For non-fast modes, fetches missing phone numbers via CID lookup
+8. Returns results + resumeState (if paused)
 
 ---
 
-### Internal: `fetchit(url: string): Promise<Document>`
+### `fetchit(url: string): Promise<Array>`
 
-Fetches a URL and returns a parsed DOM Document.
+Fetches a Google Search URL and returns parsed results.
 
-**Headers Sent:**
+**Returns:** Array of result objects (same shape as above).
+
+---
+
+### `fetchExtraDetails(query: string, cid: string): Promise<string|null>`
+
+Fetches extra details for a specific business using Google's async endpoint.
+
+**Parameters:**
+- `query` — Original search query
+- `cid` — Business's Google ID
+
+**Returns:** Raw response text or `null` on error.
+
+---
+
+### `extractContactInfoBulletproof(rawPayload: string): Promise<Object>`
+
+Parses contact info from Google's raw response payload.
+
+**Returns:**
+```javascript
+{
+  address: string|null,
+  phoneNumbers: string[]
+}
 ```
-User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/136.0.0.0
-Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8
-Accept-Language: en-GB,en-US;q=0.9,en;q=0.8
-```
 
-**Timeout:** 20 seconds
+---
+
+### Internal: `parseHTML(html: string): Document`
+
+Parses HTML string to DOM Document. Uses native `DOMParser` in browser, `jsdom` in Node.js.
+
+---
+
+### Internal: `extractPhone(text: string): string`
+
+Extracts phone number (8+ digits) from text string.
+
+---
+
+### Internal: `dedup(list: Array): Array`
+
+Deduplicates results by CID or title+address composite key.
 
 ---
 
@@ -80,6 +139,18 @@ Generates an Excel file from result data.
 
 ---
 
+### `saveToDownloads(data: Array, query: string): Promise<{uri: string, filename: string}>`
+
+Saves Excel file to Downloads folder (native only).
+
+**Parameters:**
+- `data` — Array of result objects
+- `query` — Search query for filename
+
+**Returns:** `{ uri: string, filename: string }`
+
+---
+
 ### `shareLastFile(filename: string): Promise<void>`
 
 Shares the last exported file using the native share dialog.
@@ -91,6 +162,38 @@ Shares the last exported file using the native share dialog.
 
 ---
 
-### `getLastSavedUri(): string | null`
+### `getLastSavedUri(): string|null`
 
 Returns the file URI of the last saved Excel file, or `null` if none saved.
+
+---
+
+## Example Usage
+
+```javascript
+import { search } from './services/scraper.js';
+import { makeExcel } from './services/excel.js';
+
+// Simple search
+const { results } = await search('restaurants in Chennai');
+
+// With progress callback
+const { results, resumeState } = await search('cafes in Mumbai', 'normal', (progress) => {
+  console.log(progress.message);
+  return true; // keep going
+});
+
+// Pause mid-search
+search('hotels in Bangalore', 'normal', () => {
+  // Return false to pause
+  return this.shouldPause ? false : true;
+}).then(({ results, resumeState }) => {
+  if (resumeState) {
+    console.log('Search paused, can resume later');
+    // Save resumeState for later...
+  }
+});
+
+// Export to Excel
+const { uri, filename } = await makeExcel(results, 'restaurants in Chennai');
+```

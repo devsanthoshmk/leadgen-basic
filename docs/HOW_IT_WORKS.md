@@ -58,15 +58,15 @@ The app sends a request to Google the same way your browser does — it just doe
 
 **On mobile, this is even more clever.** Mobile apps can make web requests without the usual browser restrictions. When you visit a website in Chrome, the browser enforces rules about which sites can talk to each other (called CORS). But our app uses the phone's own networking capability to talk directly to Google — no browser restrictions apply. This is the same technology that every app on your phone uses to fetch data. Moreover this approch uses your residential IP address to make requests to google and also mimics the way a real user interacts with google so it is less likely to be blocked by google.
 
-### The three speed modes
+### The three search modes
 
 You get to choose how thorough the search is:
 
-**Fast Mode** — Gets you results in about 5 seconds per 200-300 businesses. You'll get names, addresses, categories, and ratings. Phone numbers may be missing for some results. Best when you need a quick list and don't need to call everyone.
+**Fast Mode** — Gets you results in about 5 seconds per 200-300 businesses. You'll get names, addresses, categories, ratings, and websites. Phone numbers may be missing since it skips the detail lookup step. Best when you need a quick list and don't need to call everyone.
 
-**Normal Mode (Default)** — The smart middle ground. It first checks if Google already showed phone numbers in the search results. If yes, it's done fast — just like fast mode. If not, it goes and fetches the phone numbers one by one. Takes about 10-20 seconds for 200-300 businesses.
+**Auto Mode (Default)** — The smart middle ground. It first checks if Google already showed phone numbers in the search results. If yes, it's done fast — just like fast mode. If not, it goes and fetches the phone numbers one by one using each business's unique Google ID. Takes about 10-20 seconds for 200-300 businesses.
 
-**Long Mode** — Goes the extra mile for every single business. Even if Google showed a phone number, it double-checks by looking up each business individually to get more details (now it gets full completely address). Most thorough, but slowest. Takes about 20-30 seconds for 200-300 businesses. This is in development in future it can get more infos like actural reviews and other infos.
+**Deep Mode (In Development)** — Goes the extra mile for every single business. Even if Google showed a phone number, it double-checks by looking up each business individually to get more details (now it gets full complete address). Most thorough, but slowest. Takes about 20-30 seconds for 200-300 businesses. This is in development — more features coming soon.
 
 ---
 
@@ -82,13 +82,14 @@ It's like knowing that in a phonebook, the name is always bold, the number is al
 
 | What | How |
 |------|-----|
-| Business name | From the heading of each listing |
+| Business name | From the heading of each listing (role="heading") |
 | Star rating | From the rating display (e.g., 4.5 out of 5) |
 | Number of reviews | From the review count (e.g., "128 reviews") |
 | Business category | From the type label (e.g., "Indian Restaurant") |
-| Address | From the directions link embedded in the listing |
+| Address | From the directions link embedded in the listing (/maps/dir/) |
 | Phone number | From the listing text, then validated for correctness |
 | Website | From the website link in the listing |
+| CID (Google ID) | From the data-cid attribute for detailed lookups |
 
 ### Getting more results (pagination)
 
@@ -146,43 +147,22 @@ When you tap the pause button, the app freezes the search at the exact point it'
 - Which results still need phone number lookups
 - Exactly where it stopped in the phone number lookup process
 
-All of this is saved on your phone. If you have cloud sync turned on, it's also saved online.
+All of this is saved locally on your phone.
 
 ### How resume works
 
-When you go to your search history, you'll see paused searches marked with an amber dot. Tap "Resume" and the search picks up from the exact point it stopped — it doesn't start over.
+When you go to your history, you'll see paused searches marked with an amber dot. Tap the play button to resume and the search picks up from the exact point it stopped — it doesn't start over.
 
-**Cross-device resume:** If you started a search on your phone and want to finish it on your tablet, you can. The pause state is synced through the cloud, so any device with your account can pick up where another left off.
+### Technical details about resume
 
----
-
-## Part 5: The Cloud — Optional Online Storage
-
-### What it does
-
-The cloud is entirely optional. The app works perfectly fine offline. But if you turn on cloud sync, you get:
-
-1. **Search history in the cloud** — Your past searches and results are saved online, not just on your phone
-2. **Smart duplicate avoidance** — Before scraping Google again, the app checks if you (or someone else) already searched for the same thing. If the results exist in the cloud, it shows you those instantly instead of scraping again.
-3. **Similar search suggestions** — If you search for "restaurants in Chennai" and someone already searched "best restaurants Chennai", the app will suggest using those existing results.
-4. **Cross-device sync** — Start on your phone, check results on your laptop.
-
-### How it's built
-
-The cloud backend runs on Cloudflare Workers — a technology that runs your code in 300+ data centers around the world. This means whether you're in India, the US, or Europe, the cloud responds fast because there's a server near you.
-
-The database is Cloudflare D1 — essentially an SQLite database that lives in the cloud. It stores three things:
-1. **Searches** — What was searched and when
-2. **Results** — The actual business data (one row per business)
-3. **Resume states** — Pause/resume data for incomplete searches
-
-### Security
-
-The cloud API is protected by a password. Every request from the app includes this password, and the server rejects anything without it. It's simple but effective for a personal tool.
+The `search()` function in `scraper.js` accepts a 4th argument `resumeState`. When provided:
+- Phase 1 (search pages): starts from `resumeState.pagination` offset instead of page 0, and seeds results with `resumeState.partialResults`.
+- Phase 2 (enrich): if paused mid-enrichment, resumes from `resumeState.enrichIndex` so already-enriched items aren't re-fetched.
+- If `resumeState.phase === 'enrich'`, Phase 1 is skipped entirely.
 
 ---
 
-## Part 6: Running in the Background
+## Part 5: Running in the Background
 
 ### The problem
 
@@ -200,37 +180,44 @@ When the search finishes, the foreground service stops, and you get a notificati
 
 ---
 
-## Part 7: The History System
+## Part 6: The History System
 
-### What gets saved
+### What's in history
 
-Every search you complete is saved to your history. Each entry shows:
+Every search you complete is saved to your local history. Each entry shows:
 - The search query
 - How many results were found
 - When you searched
-- The search mode used
+- The search mode used (Fast, Auto, or Deep)
 
 ### Completed vs. Paused
 
 - **Green dot** = Completed search. All results are available. You can view, export, or delete.
 - **Amber dot** = Paused search. Has partial results. You can resume or delete.
 
-### Local cache
+### History actions
 
-The app keeps your 20 most recent searches cached on your phone for 24 hours. This means if you search for the same thing again within a day, results appear instantly without hitting Google again.
-
-After 24 hours, the cache expires. After 20 searches, the oldest cache is cleared to save space.
+- **Tap** — Load the results (or resume a paused search)
+- **Play button** — Resume a paused search
+- **Trash button** — Delete the history item
 
 ---
 
-## Part 8: The Results View
+## Part 7: Results View Features
 
 ### Filtering and sorting
 
 Once you have results, you can:
 
-- **Text search** — Type to filter results instantly (searches across name, category, address, and phone)
-- **Sort by** — Name, rating, reviews, category, or address (ascending or descending)
+- **Text filter** — Type to filter results instantly (searches across name, category, address, and phone) with 250ms debounce
+- **Sort by** — Name, Stars, Reviews, or Category
+- **Sort direction** — Toggle ascending/descending
+
+### Results source indicator
+
+The toolbar chip shows where results came from:
+- **(Cached)** — Loaded from local cache (24-hour cache)
+- **(paused)** — Search was paused, showing partial results
 
 ### Business actions
 
@@ -239,7 +226,23 @@ Tap on any business card to see its full details. From there you can:
 - **Call** — Tap the phone number to open your dialer
 - **Navigate** — Tap the address to open Google Maps with directions
 - **Visit website** — Tap to open the business website in your browser
-- **Copy** — Long press to copy any field to your clipboard
+
+---
+
+## Part 8: Settings
+
+### Data
+
+- **Clear Local Cache** — Remove all cached searches from the device
+
+### Notifications
+
+- **Enable/Disable** — Request notification permissions
+- **Status** — Shows if notifications are granted
+
+### About
+
+- Shows app version (currently v2.0.0)
 
 ---
 
@@ -281,10 +284,10 @@ Here's the complete picture of how all the pieces fit together:
 │          v                                   │
 │   Shows you the results                      │
 │          |                                   │
-│    ┌─────┴──────┬──────────────┐             │
-│    v            v              v              │
-│  Export to   Save to      Cache locally       │
-│  Excel       cloud        (24 hours)          │
+│    ┌─────┴─────────────────────┐             │
+│    v                           v             │
+│  Export to                Cache locally      │
+│  Excel                    (24 hours)         │
 │                                              │
 └─────────────────────────────────────────────┘
 ```
@@ -310,11 +313,11 @@ The scraping needs an internet connection (it has to reach Google), but viewing 
 
 ### Smart about efficiency
 
-The normal search mode doesn't waste time fetching phone numbers that are already available. It checks first, then only does extra work when needed. This makes it 3-4x faster than a "fetch everything always" approach.
+The Auto search mode doesn't waste time fetching phone numbers that are already available. It checks first, then only does extra work when needed. This makes it 3-4x faster than a "fetch everything always" approach.
 
 ### Pause and resume
 
-No other comparable tool lets you pause a search mid-way and continue later — even on a different device. This is critical for large searches that might take minutes.
+No other comparable tool lets you pause a search mid-way and continue later right where you left off. This is critical for large searches that might take minutes.
 
 ---
 
@@ -322,13 +325,11 @@ No other comparable tool lets you pause a search mid-way and continue later — 
 
 | Component | Technology | Why This Choice |
 |-----------|-----------|----------------|
-| App framework | Vue 3 + Ionic | One codebase for Android, iOS, and web |
-| Native bridge | Capacitor | Lets the web app use phone features (files, notifications, HTTP) |
+| App framework | Vue 3 + Ionic 8 | One codebase for Android, iOS, and web |
+| Native bridge | Capacitor 8 | Lets the web app use phone features (files, notifications, HTTP) |
 | Scraping | fetch + DOMParser | Built-in browser tools, zero extra libraries, fastest possible |
 | Phone validation | libphonenumber-js | Same library Google uses internally |
 | Excel export | write-excel-file | Tiny library, generates real .xlsx files |
-| Cloud backend | Cloudflare Workers | Runs in 300+ locations, essentially free |
-| Cloud database | Cloudflare D1 | Serverless SQLite, no maintenance needed |
 | Background mode | Android Foreground Service | Keeps search alive when app is minimized |
 | File saving | Custom Android plugin | Saves directly to Downloads folder |
 
@@ -346,7 +347,7 @@ To reach Google Search. Everything else (parsing, filtering, exporting) happens 
 Yes. The search query determines the location. "plumbers in London" works just as well as "plumbers in Chennai."
 
 **Why are some phone numbers missing?**
-Not all businesses have phone numbers listed on Google. The app can only find what Google has. The "Long" search mode finds the most phone numbers by checking multiple sources for each business.
+Not all businesses have phone numbers listed on Google. The app can only find what Google has. The "Deep" search mode finds the most phone numbers by checking multiple sources for each business.
 
 **How many results can it find?**
 As many as Google has. For a major city and popular business type, this could be 200-500+ results. For niche queries in small towns, it might be 10-20.
@@ -356,3 +357,8 @@ The app itself is free. You need an internet connection to scrape, but the scrap
 
 **What happens if I lose internet mid-search?**
 If you have pause/resume enabled, your progress is saved. Reconnect and resume from where you left off. If you didn't pause, you'll need to start over, but the cache might have partial results.
+
+**What's the difference between the three modes?**
+- **Fast**: Gets what's on the search page immediately, skips extra lookups
+- **Auto**: Checks if phones are already there, fetches missing ones only if needed (recommended)
+- **Deep**: Fetches extra details for ALL results, more accurate addresses, more phone coverage (in development)

@@ -10,17 +10,16 @@
 2. [The Scraper Engine — Heart of the Application](#the-scraper-engine--heart-of-the-application)
 3. [How the Scraper Is Moulded Into the App](#how-the-scraper-is-moulded-into-the-app)
 4. [Why This Is the Most Efficient Approach](#why-this-is-the-most-efficient-approach)
-5. [Cloud Sync Layer — Cloudflare Workers + D1](#cloud-sync-layer--cloudflare-workers--d1)
-6. [Native Platform Integration](#native-platform-integration)
-7. [Data Pipeline: From HTML to Excel](#data-pipeline-from-html-to-excel)
-8. [Resumability — Stateful Scraping Across Sessions](#resumability--stateful-scraping-across-sessions)
-9. [Performance Characteristics & Benchmarks](#performance-characteristics--benchmarks)
+5. [Native Platform Integration](#native-platform-integration)
+6. [Data Pipeline: From HTML to Excel](#data-pipeline-from-html-to-excel)
+7. [Resumability — Stateful Scraping Across Sessions](#resumability--stateful-scraping-across-sessions)
+8. [Performance Characteristics & Benchmarks](#performance-characteristics--benchmarks)
 
 ---
 
 ## System Architecture Overview
 
-Mergex LeadGen follows a **client-heavy, server-light** architecture. The entire scraping, parsing, enrichment, and export pipeline runs on the user's device. The optional cloud backend exists purely for data persistence and cross-device sync — it performs zero computation on the scraped data.
+Mergex LeadGen follows a **100% client-side architecture**. The entire scraping, parsing, enrichment, and export pipeline runs on the user's device without requiring any server-side infrastructure.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -48,14 +47,7 @@ Mergex LeadGen follows a **client-heavy, server-light** architecture. The entire
 │  │  • Local Notifications                          │    │
 │  │  • SaveToDownloads (custom plugin)              │    │
 │  └─────────────────────────────────────────────────┘    │
-└───────────────────────┬─────────────────────────────────┘
-                        │ (optional cloud sync)
-                        ▼
-         ┌──────────────────────────────┐
-         │  Cloudflare Workers + D1     │
-         │  (Search history & resume    │
-         │   state persistence only)    │
-         └──────────────────────────────┘
+└─────────────────────────────────────────────────────────┘
 ```
 
 **Technology Stack:**
@@ -69,8 +61,6 @@ Mergex LeadGen follows a **client-heavy, server-light** architecture. The entire
 | Scraper | fetch + DOMParser + XPath | Zero-dependency HTML parsing |
 | Phone Validation | libphonenumber-js | Google's phone lib (JS port) |
 | Excel Export | write-excel-file | Lightweight .xlsx generation |
-| Backend | Cloudflare Workers | Edge-deployed API |
-| Database | Cloudflare D1 (SQLite) | Serverless relational storage |
 | File I/O | Custom SaveToDownloadsPlugin | Android MediaStore integration |
 
 ---
@@ -292,11 +282,11 @@ User Input → doSearch() → scraper.search() → onProgress callback → UI up
 
 **`doSearch()` method** is the bridge between UI and scraper:
 
-1. **Pre-search checks:** Cache lookup → Cloud match → Similar search suggestion
+1. **Pre-search checks:** Local cache lookup
 2. **Foreground service start** (Android): Prevents OS from killing the app
 3. **Scraper invocation:** Passes query, mode, progress callback, and optional resume state
 4. **Progress callback:** Updates UI counters, checks `searchCancelled` flag
-5. **Post-search:** Cache results → Cloud sync → Notifications → Foreground service stop
+5. **Post-search:** Cache results → Notifications → Foreground service stop
 
 ### 3.2 Capacitor HTTP Patching — The CORS Solution
 
@@ -350,35 +340,6 @@ const cacheKey = `mergex_cache_${hashCode(query + mode)}`;
 ```
 
 **LRU eviction:** When cache exceeds 20 entries, the oldest entry is removed. This prevents localStorage from growing unbounded on devices with limited storage.
-
-### 3.5 Cloud Sync Integration
-
-When cloud sync is enabled, the app layers server-side persistence on top of local operations:
-
-```
-Search query entered
-       │
-       ├─▶ Check local cache (24h TTL)
-       │       └─ HIT → Show cached results (source: "cache")
-       │
-       ├─▶ Check cloud: GET /searches/match?q=...&mode=...
-       │       └─ EXACT MATCH → Show cloud results (source: "cloud")
-       │
-       ├─▶ Check cloud: GET /searches/similar?q=...
-       │       └─ SIMILAR FOUND → Ask user: "Use similar or search fresh?"
-       │
-       └─▶ No cache/cloud hit → Run scraper
-               │
-               ├─▶ Save to local cache
-               ├─▶ POST /searches (save to cloud)
-               └─▶ Display results
-```
-
-This cascade ensures:
-1. Fastest possible response (local cache first)
-2. No duplicate cloud scrapes (exact match)
-3. Smart reuse of related searches (similar match)
-4. Fresh data when nothing matches (full scrape)
 
 ---
 
@@ -478,26 +439,7 @@ https://www.google.com/async/lcl_akp?async=ludocids:{cid},_fmt:prog
 - **No server cost** — nothing to maintain
 - **Platform-native TLS** — uses OS certificate store, proper TLS negotiation
 
-### 4.6 Cloudflare Workers + D1 vs. Traditional Backend
-
-**Alternative:** Express.js / Django / Rails on a VPS ($5-20/month), PostgreSQL database ($15+/month).
-
-**Our approach:** Cloudflare Workers (serverless) + D1 (serverless SQLite).
-
-**Why this wins:**
-
-| Factor | Traditional | Cloudflare Workers + D1 |
-|--------|-------------|------------------------|
-| **Cost** | $20-50/month minimum | Free tier covers most usage |
-| **Cold Start** | 2-5 seconds (Node.js) | 0ms (V8 isolates, always warm) |
-| **Deployment** | SSH, Docker, CI/CD | `wrangler deploy` (one command) |
-| **Scaling** | Manual (add servers) | Automatic (edge network) |
-| **Global Latency** | Single region | 300+ edge locations worldwide |
-| **Maintenance** | OS patches, DB backups | Zero ops |
-
-The backend only stores search metadata and results — it needs no compute power, making serverless the obvious fit.
-
-### 4.7 No Headless Browser
+### 4.6 No Headless Browser
 
 **Alternative:** Puppeteer/Playwright for scraping — requires a running Chrome instance, 200MB+ memory, 2-5 seconds per page.
 
@@ -511,92 +453,9 @@ The backend only stores search metadata and results — it needs no compute powe
 
 ---
 
-## Cloud Sync Layer — Cloudflare Workers + D1
-
-**File: `worker/src/index.ts` (~488 lines)**
-
-### 5.1 Database Schema
-
-Three tables with focused indices:
-
-```sql
--- Core search metadata
-CREATE TABLE searches (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  query        TEXT NOT NULL,
-  mode         TEXT DEFAULT 'normal',
-  result_count INTEGER DEFAULT 0,
-  created_at   TEXT DEFAULT (datetime('now'))
-);
-CREATE INDEX idx_searches_query ON searches(query);
-CREATE INDEX idx_searches_query_mode ON searches(query, mode);
-
--- Scraped business results (1:N relationship with searches)
-CREATE TABLE results (
-  id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-  search_id             INTEGER NOT NULL,
-  title                 TEXT,
-  cid                   TEXT,
-  stars                 REAL,
-  reviews               INTEGER,
-  category              TEXT,
-  address               TEXT,
-  complete_phone_number TEXT,
-  url                   TEXT,
-  FOREIGN KEY (search_id) REFERENCES searches(id)
-);
-CREATE INDEX idx_results_search ON results(search_id);
-
--- Resume states for cross-device pause/resume
-CREATE TABLE resume_states (
-  id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  query           TEXT NOT NULL,
-  mode            TEXT DEFAULT 'normal',
-  resume_state    TEXT NOT NULL,    -- JSON blob
-  partial_results TEXT,             -- JSON array blob
-  result_count    INTEGER DEFAULT 0,
-  device_id       TEXT,
-  created_at      TEXT DEFAULT (datetime('now')),
-  updated_at      TEXT DEFAULT (datetime('now'))
-);
-CREATE INDEX idx_resume_device ON resume_states(device_id);
-```
-
-### 5.2 API Design
-
-Authentication: Simple password-based (`?password=mergex-leadgen` or `Authorization: Bearer mergex-leadgen`).
-
-**Key endpoints:**
-
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/searches` | POST | Batch insert search + results (transaction) |
-| `/searches/match` | GET | Exact query+mode lookup (cache hit check) |
-| `/searches/similar` | GET | Fuzzy LIKE search for related queries |
-| `/searches/autocomplete` | GET | Prefix-based query suggestions |
-| `/resume` | POST | Save pause state for cross-device resume |
-| `/resume?device_id=...` | GET | Fetch resume states for specific device |
-
-**Batch insert** uses D1's transaction support to atomically insert a search and all its results:
-
-```typescript
-// Pseudocode for POST /searches
-const searchId = await db.prepare(
-  'INSERT INTO searches (query, mode, result_count) VALUES (?, ?, ?)'
-).bind(query, mode, results.length).run();
-
-// Batch insert all results in one transaction
-const stmt = db.prepare(
-  'INSERT INTO results (search_id, title, cid, ...) VALUES (?, ?, ?, ...)'
-);
-await db.batch(results.map(r => stmt.bind(searchId, r.title, r.cid, ...)));
-```
-
----
-
 ## Native Platform Integration
 
-### 6.1 SaveToDownloadsPlugin (Custom Capacitor Plugin)
+### 5.1 SaveToDownloadsPlugin (Custom Capacitor Plugin)
 
 **File: `android/app/src/main/java/in/mergex/leadgen/SaveToDownloadsPlugin.java`**
 
@@ -671,7 +530,6 @@ Google Search HTML
        │
        ├──▶ Vue reactive state (UI display)
        ├──▶ localStorage cache (24h TTL, LRU)
-       ├──▶ Cloudflare D1 (optional cloud sync)
        └──▶ write-excel-file → .xlsx → SaveToDownloads
 ```
 
@@ -719,7 +577,7 @@ IDLE ──▶ SEARCHING (Phase 1: Page scraping)
 ### Resume State Persistence
 
 ```javascript
-// Saved to both localStorage and cloud
+// Saved to localStorage
 const resumeState = {
   query: "restaurants in Chennai",
   mode: "normal",
@@ -729,20 +587,12 @@ const resumeState = {
   partialResults: [...]     // 42 results collected so far
 };
 
-// Local
 localStorage.setItem('mergex_resume_state', JSON.stringify(resumeState));
-
-// Cloud (for cross-device resume)
-api.saveResumeState({
-  ...resumeState,
-  deviceId: localStorage.getItem('mergex_device_id')
-});
 ```
 
 This enables:
 1. **App restart resume** — user closes app, reopens, continues from exact point
 2. **Background interruption resume** — OS kills app, user resumes
-3. **Cross-device resume** — start on phone, continue on tablet
 
 ---
 
@@ -773,7 +623,6 @@ This enables:
 | libphonenumber-js | ~90 KB |
 | write-excel-file | ~15 KB |
 | Scraper (custom) | ~8 KB |
-| API client (custom) | ~2 KB |
 | DOMParser | 0 KB (browser built-in) |
 
 ---
@@ -782,10 +631,10 @@ This enables:
 
 Mergex LeadGen's architecture is optimized for three things:
 
-1. **Zero infrastructure cost** — Client-side scraping eliminates server compute. Cloudflare's free tier handles storage.
+1. **Zero infrastructure cost** — Client-side scraping eliminates server compute. No database or cloud server to maintain.
 2. **Maximum reliability** — No single server to fail. Each user is their own scraping node with their own IP.
 3. **Minimum complexity** — Native browser APIs (DOMParser, fetch) over external libraries. No headless browsers. No proxy servers. No API keys.
 
-The scraper is not bolted onto the app — it IS the app. Every architectural decision (Capacitor for CORS bypass, foreground services for background execution, three search modes for flexibility, CID enrichment for data completeness, resume states for reliability) exists to make the scraper work better on a mobile device. The cloud layer is purely additive — the app works perfectly without it.
+The scraper is not bolted onto the app — it IS the app. Every architectural decision (Capacitor for CORS bypass, foreground services for background execution, three search modes for flexibility, CID enrichment for data completeness, resume states for reliability) exists to make the scraper work better on a mobile device.
 
-This is the leanest possible architecture for a mobile lead generation tool: maximum output, minimum infrastructure, zero ongoing costs.
+This is the leanest possible architecture for a mobile lead generation tool: maximum output, zero infrastructure, zero ongoing costs.

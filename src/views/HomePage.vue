@@ -9,10 +9,6 @@
           </div>
         </ion-title>
         <ion-buttons slot="end">
-          <!-- Sync status indicator -->
-          <ion-button fill="clear" class="sync-indicator" :class="'sync-' + syncStatus" v-if="cloudSyncEnabled">
-            <ion-icon :icon="syncStatusIcon" slot="icon-only" :class="{ 'spin-icon': syncStatus === 'syncing' }"></ion-icon>
-          </ion-button>
           <ion-button v-if="view === 'results'" @click="goBack()" fill="clear">
             <ion-icon :icon="arrowBackOutline" slot="icon-only"></ion-icon>
           </ion-button>
@@ -25,9 +21,8 @@
       <!-- Results toolbar -->
       <ion-toolbar v-if="view === 'results'" class="results-toolbar">
         <ion-chip class="results-chip">
-          <ion-icon v-if="resultSource === 'cloud'" :icon="cloudDoneOutline" style="margin-right:4px"></ion-icon>
-          <ion-icon v-else-if="resultSource === 'cache'" :icon="timeOutline" style="margin-right:4px"></ion-icon>
-          <ion-label>{{ row_datas.length }} leads found{{ resultSource === 'cloud' ? ' (Cloud)' : resultSource === 'cache' ? ' (Cached)' : '' }}{{ resumeState ? ' (paused)' : '' }}</ion-label>
+          <ion-icon v-if="resultSource === 'cache'" :icon="timeOutline" style="margin-right:4px"></ion-icon>
+          <ion-label>{{ row_datas.length }} leads found{{ resultSource === 'cache' ? ' (Cached)' : '' }}{{ resumeState ? ' (paused)' : '' }}</ion-label>
         </ion-chip>
         <ion-buttons slot="end">
           <ion-button v-if="!downloadedUri" @click="downloadExcel" fill="solid" size="small" class="action-btn">
@@ -353,7 +348,6 @@
               <button v-if="item.status === 'paused'" class="history-action-btn history-action-btn--resume" @click.stop="resumeFromHistory(item)" aria-label="Resume search">
                 <ion-icon :icon="playCircleOutline"></ion-icon>
               </button>
-              <ion-icon v-else :icon="item.source === 'cloud' ? cloudDoneOutline : phonePortraitOutline" class="history-source-icon"></ion-icon>
               <button class="history-action-btn history-action-btn--delete" @click.stop="deleteHistoryItem(item)" aria-label="Delete">
                 <ion-icon :icon="trashOutline"></ion-icon>
               </button>
@@ -366,24 +360,6 @@
       <div v-if="view === 'settings'" class="settings-view">
         <div class="view-header">
           <h2>Settings</h2>
-        </div>
-
-        <div class="settings-section">
-          <h3 class="settings-section-title">Cloud Sync</h3>
-          <div class="settings-item">
-            <div class="settings-item-info">
-              <span class="settings-item-label">Enable Cloud Sync</span>
-              <span class="settings-item-desc">Sync searches across devices</span>
-            </div>
-            <ion-toggle v-model="cloudSyncEnabled" @ionChange="onCloudSyncToggle"></ion-toggle>
-          </div>
-          <div class="settings-item" v-if="cloudSyncEnabled">
-            <div class="settings-item-info">
-              <span class="settings-item-label">API Status</span>
-              <span class="settings-item-desc">{{ apiStatusText }}</span>
-            </div>
-            <span class="api-dot" :class="apiStatusColor"></span>
-          </div>
         </div>
 
         <div class="settings-section">
@@ -548,7 +524,7 @@ import {
   IonSearchbar, IonButton, IonButtons, IonSpinner, IonIcon,
   IonCard, IonCardHeader, IonCardTitle, IonCardSubtitle, IonCardContent,
   IonChip, IonLabel, IonSelect, IonSelectOption,
-  IonModal, IonList, IonItem, IonToggle,
+  IonModal, IonList, IonItem,
   IonRefresher, IonRefresherContent,
   toastController,
   alertController,
@@ -560,15 +536,14 @@ import {
   arrowUpOutline, arrowDownOutline, informationCircleOutline, mailOutline,
   flashOutline, syncOutline, layersOutline, pauseOutline,
   helpCircleOutline, checkmarkCircle, closeCircle, timeOutline, bulbOutline,
-  searchOutline, settingsOutline, cloudDoneOutline, cloudOfflineOutline,
-  alertCircleOutline, playCircleOutline, trashOutline, phonePortraitOutline,
+  searchOutline, settingsOutline,
+  playCircleOutline, trashOutline, phonePortraitOutline,
 } from 'ionicons/icons';
 import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { search } from '../services/scraper.js';
 import { makeExcel, shareLastFile, SaveToDownloads } from '../services/excel.js';
-import * as api from '../services/api.js';
 
 // ─── Local Cache helpers ────────────────────────────────────────────────────
 const CACHE_PREFIX = 'mergex_cache_';
@@ -649,7 +624,7 @@ export default {
     IonSearchbar, IonButton, IonButtons, IonSpinner, IonIcon,
     IonCard, IonCardHeader, IonCardTitle, IonCardSubtitle, IonCardContent,
     IonChip, IonLabel, IonSelect, IonSelectOption,
-    IonModal, IonList, IonItem, IonToggle,
+    IonModal, IonList, IonItem,
     IonRefresher, IonRefresherContent,
   },
   data() {
@@ -726,23 +701,12 @@ export default {
           ],
         },
       ],
-      // Cloud sync
-      cloudSyncEnabled: localStorage.getItem('mergex_cloud_sync') !== 'false',
-      syncStatus: 'idle', // idle | syncing | synced | offline | error
-      resultSource: null, // null | 'cloud' | 'cache'
+      resultSource: null, // null | 'cache'
       // History
       historyItems: [],
       historyFilter: '',
       // Settings
-      apiStatusText: 'Checking...',
-      apiStatusColor: 'dot-gray',
       cacheCount: getCacheCount(),
-      // Device ID for resume
-      deviceId: localStorage.getItem('mergex_device_id') || (() => {
-        const id = 'dev_' + Math.random().toString(36).slice(2, 10);
-        localStorage.setItem('mergex_device_id', id);
-        return id;
-      })(),
       // icons
       logoGithub, logoLinkedin, logoInstagram, logoTwitter, shareSocialOutline,
       downloadOutline, arrowBackOutline,
@@ -751,18 +715,10 @@ export default {
       arrowUpOutline, arrowDownOutline, informationCircleOutline, mailOutline,
       helpCircleOutline, checkmarkCircle, closeCircle, timeOutline, bulbOutline,
       pauseOutline, searchOutline, settingsOutline,
-      cloudDoneOutline, cloudOfflineOutline, alertCircleOutline,
       playCircleOutline, trashOutline, phonePortraitOutline,
     };
   },
   computed: {
-    syncStatusIcon() {
-      if (this.syncStatus === 'synced') return cloudDoneOutline;
-      if (this.syncStatus === 'syncing') return syncOutline;
-      if (this.syncStatus === 'offline') return cloudOfflineOutline;
-      if (this.syncStatus === 'error') return alertCircleOutline;
-      return cloudDoneOutline;
-    },
     filteredHistory() {
       if (!this.historyFilter) return this.historyItems;
       const q = this.historyFilter.toLowerCase();
@@ -793,9 +749,6 @@ export default {
     },
   },
   async mounted() {
-    // Check API health if cloud sync enabled
-    if (this.cloudSyncEnabled) this.checkApiHealth();
-
     if (Capacitor.isNativePlatform()) {
       await this.syncNotificationStatus();
 
@@ -1063,9 +1016,6 @@ export default {
       } else if (target === 'settings') {
         this.view = 'settings';
         this.cacheCount = getCacheCount();
-        if (this.cloudSyncEnabled) {
-          this.checkApiHealth();
-        }
       }
     },
     goBack() {
@@ -1125,89 +1075,47 @@ export default {
       const days = Math.floor(hrs / 24);
       return `${days}d ago`;
     },
-    // ─── Cloud Sync helpers ──────────────────────────────────────────────
-    async checkApiHealth() {
-      console.log('[CloudSync] Checking API health...');
-      try {
-        const res = await api.checkHealth();
-        if (res.ok) {
-          console.log(`[CloudSync] API healthy, latency: ${res.latency}ms`);
-          this.apiStatusText = `Connected (${res.latency}ms)`;
-          this.apiStatusColor = 'dot-green';
-          this.syncStatus = 'idle';
-        } else {
-          console.warn(`[CloudSync] API health check failed: ${res.error}`);
-          this.apiStatusText = res.error === 'offline' ? 'Offline' : `Error: ${res.error}`;
-          this.apiStatusColor = res.error === 'offline' ? 'dot-yellow' : 'dot-red';
-          this.syncStatus = res.error === 'offline' ? 'offline' : 'error';
-        }
-      } catch (err) {
-        console.error('[CloudSync] API unreachable:', err);
-        this.apiStatusText = 'Unreachable';
-        this.apiStatusColor = 'dot-red';
-        this.syncStatus = 'error';
-      }
-    },
-    onCloudSyncToggle() {
-      console.log(`[CloudSync] Toggle: ${this.cloudSyncEnabled ? 'ENABLED' : 'DISABLED'}`);
-      localStorage.setItem('mergex_cloud_sync', this.cloudSyncEnabled ? 'true' : 'false');
-      if (this.cloudSyncEnabled) this.checkApiHealth();
-    },
     // ─── History ─────────────────────────────────────────────────────────
     async loadHistory() {
       const items = [];
-      // Load from cloud if enabled
-      if (this.cloudSyncEnabled) {
-        console.log('[CloudSync] Loading search history from cloud...');
-        const res = await api.getSearches(50, 0);
-        if (res.ok && res.data.searches) {
-          console.log(`[CloudSync] Loaded ${res.data.searches.length} history items from cloud`);
-          res.data.searches.forEach(s => items.push({ ...s, source: 'cloud' }));
-        } else {
-          console.warn('[CloudSync] Failed to load history:', res.error);
-        }
-        // Load cloud resume states
-        console.log('[CloudSync] Loading resume states for history...');
-        const resumeRes = await api.getResumeStates();
-        if (resumeRes.ok && resumeRes.data.resumeStates?.length > 0) {
-          console.log(`[CloudSync] Found ${resumeRes.data.resumeStates.length} cloud resume states`);
-          for (const rs of resumeRes.data.resumeStates) {
-            items.push({
-              id: rs.id,
-              query: rs.query,
-              mode: rs.mode,
-              result_count: rs.result_count,
-              created_at: rs.updated_at || rs.created_at,
-              source: 'cloud',
-              status: 'paused',
-              _resumeState: typeof rs.resume_state === 'string' ? JSON.parse(rs.resume_state) : rs.resume_state,
-              _partialResults: rs.partial_results ? (typeof rs.partial_results === 'string' ? JSON.parse(rs.partial_results) : rs.partial_results) : [],
-            });
-          }
-        }
-      }
       // Load local resume state
       const localResume = localStorage.getItem('mergex_resume_state');
       if (localResume) {
         try {
           const parsed = JSON.parse(localResume);
-          console.log(`[CloudSync] Found local resume state: "${parsed.query}"`);
-          // Avoid duplicate if cloud already has same query
-          const isDupe = items.some(i => i.status === 'paused' && i.query === parsed.query);
-          if (!isDupe) {
-            items.push({
-              id: 'local_resume',
-              query: parsed.query,
-              mode: parsed.mode,
-              result_count: parsed.resultCount || 0,
-              created_at: parsed.timestamp,
-              source: 'local',
-              status: 'paused',
-              _resumeState: parsed.resumeState,
-              _partialResults: parsed.partialResults || [],
-            });
-          }
+          items.push({
+            id: 'local_resume',
+            query: parsed.query,
+            mode: parsed.mode,
+            result_count: parsed.resultCount || 0,
+            created_at: parsed.timestamp,
+            source: 'local',
+            status: 'paused',
+            _resumeState: parsed.resumeState,
+            _partialResults: parsed.partialResults || [],
+          });
         } catch { /* ignore */ }
+      }
+      // Load cached searches from localStorage
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith(CACHE_PREFIX)) {
+          try {
+            const entry = JSON.parse(localStorage.getItem(k));
+            if (entry && entry.query) {
+              items.push({
+                id: k,
+                cacheKey: k,
+                query: entry.query,
+                mode: entry.mode,
+                result_count: (entry.results || []).length,
+                created_at: entry.timestamp,
+                source: 'local',
+                status: 'completed',
+              });
+            }
+          } catch { /* ignore */ }
+        }
       }
       // Sort by most recent first
       items.sort((a, b) => {
@@ -1221,30 +1129,11 @@ export default {
       await this.loadHistory();
       event?.target?.complete();
     },
-    async loadHistoryItem(item) {
-      if (item.source === 'cloud' && item.id) {
-        this.syncStatus = 'syncing';
-        const res = await api.getSearch(item.id);
-        this.syncStatus = 'idle';
-        if (res.ok) {
-          this.row_datas = (res.data.results || []).map(r => ({
-            title: r.title || '',
-            cid: r.cid || '',
-            stars: r.stars || 0,
-            reviews: r.reviews || 0,
-            category: r.category || '',
-            address: r.address || '',
-            completePhoneNumber: r.complete_phone_number || r.completePhoneNumber || '',
-            url: r.url || '',
-          }));
-          this.input = item.query;
-          this.resultSource = 'cloud';
-          this.viewStack.push(this.view);
-          this.view = 'results';
-          return;
-        }
+    loadHistoryItem(item) {
+      if (item.status === 'paused') {
+        this.viewPausedResults(item);
+        return;
       }
-      // fallback: try cache
       const cached = getCachedSearch(item.query, item.mode || 'normal');
       if (cached) {
         this.row_datas = cached.results;
@@ -1263,7 +1152,6 @@ export default {
       await alert.present();
     },
     viewPausedResults(item) {
-      console.log(`[CloudSync] Viewing partial results for "${item.query}" (${item.result_count} leads)`);
       this.row_datas = (item._partialResults || []).map(r => ({
         title: r.title || '',
         cid: r.cid || '',
@@ -1281,18 +1169,11 @@ export default {
       this.view = 'results';
     },
     async resumeFromHistory(item) {
-      console.log(`[CloudSync] Resuming from history — source: ${item.source}, query: "${item.query}", ${item.result_count || 0} partial results`);
       this.input = item.query;
       this.searchMode = item.mode || 'normal';
       this.resumeState = item._resumeState;
       if (item._partialResults?.length) {
         this.row_datas = item._partialResults;
-        console.log(`[CloudSync] Restored ${this.row_datas.length} partial results`);
-      }
-      // Clean up the resume state
-      if (item.source === 'cloud' && item.id && item.id !== 'local_resume') {
-        console.log(`[CloudSync] Deleting consumed cloud resume state: ${item.id}`);
-        await api.deleteResumeState(item.id);
       }
       localStorage.removeItem('mergex_resume_state');
       this.historyItems = this.historyItems.filter(h => h !== item);
@@ -1307,18 +1188,17 @@ export default {
           { text: 'Cancel', role: 'cancel' },
           {
             text: 'Delete',
-            handler: async () => {
-              if (item.status === 'paused') {
-                // Delete resume state
-                if (item.source === 'cloud' && item.id && item.id !== 'local_resume') {
-                  await api.deleteResumeState(item.id);
-                }
-                if (item.source === 'local' || item.id === 'local_resume') {
-                  localStorage.removeItem('mergex_resume_state');
-                }
-              } else if (item.source === 'cloud' && item.id) {
-                await api.deleteSearch(item.id);
+            handler: () => {
+              if (item.status === 'paused' || item.id === 'local_resume') {
+                localStorage.removeItem('mergex_resume_state');
               }
+              if (item.cacheKey) {
+                localStorage.removeItem(item.cacheKey);
+              } else {
+                const k = cacheKey(item.query, item.mode || 'normal');
+                localStorage.removeItem(k);
+              }
+              this.cacheCount = getCacheCount();
               this.historyItems = this.historyItems.filter(h => h !== item);
             },
           },
@@ -1365,7 +1245,7 @@ export default {
 
       this.resultSource = null;
 
-      // ── Phase 6: Check local cache first ──
+      // ── Check local cache first ──
       if (!this.resumeState) {
         const cached = getCachedSearch(this.input, this.searchMode);
         if (cached) {
@@ -1380,93 +1260,7 @@ export default {
         }
       }
 
-      // ── Phase 3: CloudSync — check cloud before scraping ──
-      if (this.cloudSyncEnabled && !this.resumeState) {
-        console.log(`[CloudSync] Phase 3: Checking cloud for existing results — query="${this.input}", mode="${this.searchMode}"`);
-        this.syncStatus = 'syncing';
-        try {
-          // Exact match
-          console.log('[CloudSync] Looking for exact match...');
-          const matchRes = await api.matchSearch(this.input, this.searchMode);
-          if (matchRes.ok && matchRes.data.match) {
-            const { search: matchedSearch, results } = matchRes.data.match;
-            this.row_datas = (results || []).map(r => ({
-              title: r.title || '',
-              cid: r.cid || '',
-              stars: r.stars || 0,
-              reviews: r.reviews || 0,
-              category: r.category || '',
-              address: r.address || '',
-              completePhoneNumber: r.complete_phone_number || r.completePhoneNumber || '',
-              url: r.url || '',
-            }));
-            this.resultSource = 'cloud';
-            this.syncStatus = 'synced';
-            this.view = 'results';
-            setCachedSearch(this.input, this.searchMode, this.row_datas);
-            console.log(`[CloudSync] Exact match found! Loaded ${this.row_datas.length} leads from cloud (search id: ${matchedSearch?.id})`);
-            const toast = await toastController.create({
-              message: `Loaded ${this.row_datas.length} leads from cloud`, duration: 2000, position: 'bottom', color: 'dark',
-            });
-            await toast.present();
-            return;
-          }
-
-          // Similar search
-          console.log('[CloudSync] No exact match, looking for similar searches...');
-          const simRes = await api.findSimilar(this.input);
-          if (simRes.ok && simRes.data.similar?.length > 0) {
-            console.log(`[CloudSync] Found ${simRes.data.similar.length} similar searches:`, simRes.data.similar.map(s => `"${s.query}" (${s.result_count} leads)`));
-            const useSimilar = await new Promise(resolve => {
-              const items = simRes.data.similar.slice(0, 3);
-              alertController.create({
-                header: 'Similar Searches Found',
-                message: items.map(s => `"${s.query}" (${s.result_count} leads)`).join('\n'),
-                buttons: [
-                  { text: 'Search Fresh', role: 'cancel', handler: () => resolve(null) },
-                  ...items.map(s => ({
-                    text: `Use "${s.query}"`,
-                    handler: () => resolve(s),
-                  })),
-                ],
-              }).then(a => a.present());
-            });
-
-            if (useSimilar) {
-              console.log(`[CloudSync] User chose similar search: "${useSimilar.query}" (id: ${useSimilar.id})`);
-              const fullRes = await api.getSearch(useSimilar.id);
-              if (fullRes.ok) {
-                this.row_datas = (fullRes.data.results || []).map(r => ({
-                  title: r.title || '',
-                  cid: r.cid || '',
-                  stars: r.stars || 0,
-                  reviews: r.reviews || 0,
-                  category: r.category || '',
-                  address: r.address || '',
-                  completePhoneNumber: r.complete_phone_number || r.completePhoneNumber || '',
-                  url: r.url || '',
-                }));
-                this.resultSource = 'cloud';
-                this.syncStatus = 'synced';
-                this.view = 'results';
-                console.log(`[CloudSync] Loaded ${this.row_datas.length} leads from similar search`);
-                return;
-              }
-            } else {
-              console.log('[CloudSync] User chose to search fresh, skipping similar results');
-            }
-          } else {
-            console.log('[CloudSync] No similar searches found');
-          }
-          console.log('[CloudSync] No cloud results available, proceeding to scrape');
-          this.syncStatus = 'idle';
-        } catch (err) {
-          console.error('[CloudSync] Cloud check failed, falling back to scrape:', err);
-          this.syncStatus = 'offline';
-        }
-      }
-
-      // ── Original scraping flow ──
+      // ── Scraping flow ──
       // Show long mode confirmation
       if (this.searchMode === 'long' && !this.resumeState) {
         const confirmed = await new Promise(resolve => {
@@ -1511,8 +1305,6 @@ export default {
         this.resumeState = searchResult.resumeState;
 
         if (this.searchCancelled) {
-          // ── Phase 5: Save resume state on pause ──
-          console.log(`[CloudSync] Search paused — saving resume state (${this.row_datas.length} leads, phase: ${this.resumeState?.phase || 'unknown'})`);
           const resumeData = {
             query: this.input,
             mode: this.searchMode,
@@ -1521,54 +1313,20 @@ export default {
             resultCount: this.row_datas.length,
             timestamp: Date.now(),
           };
-          // Save to localStorage as backup
           localStorage.setItem('mergex_resume_state', JSON.stringify(resumeData));
-          console.log(`[CloudSync] Resume state saved to localStorage (${JSON.stringify(resumeData).length} bytes)`);
-          // Save to cloud
-          if (this.cloudSyncEnabled) {
-            try {
-              console.log(`[CloudSync] Saving resume state to cloud — query="${this.input}", ${this.row_datas.length} results, deviceId=${this.deviceId}`);
-              await api.saveResumeState({
-                query: this.input,
-                mode: this.searchMode,
-                resumeState: JSON.stringify(this.resumeState),
-                partialResults: JSON.stringify(this.row_datas),
-                resultCount: this.row_datas.length,
-                deviceId: this.deviceId,
-              });
-              console.log('[CloudSync] Resume state saved to cloud successfully');
-            } catch (err) {
-              console.warn('[CloudSync] Failed to save resume state to cloud:', err);
-            }
-          }
 
           const toast = await toastController.create({
-            message: `Search paused. Found ${this.row_datas.length} leads so far. Resume anytime, even on another device.`,
+            message: `Search paused. Found ${this.row_datas.length} leads so far. Resume anytime.`,
             duration: 4000, position: 'bottom', color: 'warning',
           });
           await toast.present();
           if (this.row_datas.length > 0) this.view = 'results';
         } else {
           // Search completed — clear resume state
-          console.log(`[CloudSync] Search completed — ${this.row_datas.length} results. Clearing resume state.`);
           this.resumeState = null;
           localStorage.removeItem('mergex_resume_state');
 
-          // ── Auto-save to cloud ──
-          if (this.cloudSyncEnabled && this.row_datas.length > 0) {
-            console.log(`[CloudSync] Auto-saving ${this.row_datas.length} results to cloud — query="${this.input}", mode="${this.searchMode}"`);
-            this.syncStatus = 'syncing';
-            try {
-              await api.saveSearch(this.input, this.searchMode, this.row_datas);
-              this.syncStatus = 'synced';
-              console.log('[CloudSync] Results saved to cloud successfully');
-            } catch (err) {
-              console.error('[CloudSync] Failed to save results to cloud:', err);
-              this.syncStatus = 'error';
-            }
-          }
-
-          // ── Save to local cache ──
+          // Save to local cache
           if (this.row_datas.length > 0) {
             setCachedSearch(this.input, this.searchMode, this.row_datas);
           }
@@ -2272,22 +2030,6 @@ export default {
   color: #E8FF00;
 }
 
-/* Sync indicator */
-.sync-indicator {
-  --color: #666;
-}
-.sync-synced { --color: #4ade80; }
-.sync-syncing { --color: #E8FF00; }
-.sync-offline { --color: #888; }
-.sync-error { --color: #ef4444; }
-.spin-icon {
-  animation: spin 1s linear infinite;
-}
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
 /* History View */
 .history-view, .settings-view {
   padding: 16px;
@@ -2452,11 +2194,6 @@ export default {
 .history-action-btn--delete:active {
   color: #ef4444;
 }
-.history-source-icon {
-  font-size: 15px;
-  color: #444;
-  padding: 6px;
-}
 
 /* Settings View */
 .settings-section {
@@ -2497,16 +2234,6 @@ export default {
   font-size: 12px;
   color: #888;
 }
-.api-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-.dot-green { background: #4ade80; }
-.dot-red { background: #ef4444; }
-.dot-yellow { background: #fbbf24; }
-.dot-gray { background: #555; }
 
 /* Info Modal */
 .info-content {

@@ -13,7 +13,7 @@
 | Excel Generation | write-excel-file | 3.0.6 |
 | Phone Parsing | libphonenumber-js | 1.12.40 |
 
-## Key Architecture Decision: No Backend
+## Key Architecture Decision: 100% Client-Side Architecture (No Backend)
 
 This app has **no backend server**. Everything runs locally inside the app:
 
@@ -29,21 +29,28 @@ This is possible because Capacitor's `CapacitorHttp` plugin patches `window.fetc
 User Input (search query)
     │
     ▼
-scraper.js: search(query)
+scraper.js: search(query, mode, onProgress, resumeState)
     │
+    ├── Check local cache (24h TTL)
+    │   │
+    │   Yes ─── Return cached results
+    │   │
+    │   No
+    │   │
     ├── fetch() → Google Search HTML
     │       (native HTTP on Android/iOS, bypasses CORS)
     │
     ├── DOMParser → Parse HTML response
     │
-    ├── CSS Selectors → Extract place data
-    │       (.VkpGBb containers, .rllt__details metadata)
+    ├── CSS Selectors → Extract place data (.VkpGBb containers, data-cid, etc.)
     │
     ├── libphonenumber-js → Validate phone numbers
     │
-    ├── Pagination → Loop until no more results
+    ├── Pagination → Loop until no more results (10 per page)
     │
-    └── Return deduplicated results array
+    ├── Phase 2: CID lookup (if mode !== 'fast' and phones missing)
+    │
+    └── Return deduplicated results array + resumeState (if paused)
             │
             ▼
     HomePage.vue: Display results
@@ -70,17 +77,65 @@ App.vue
 └── ion-router-outlet
     └── HomePage.vue (single page app)
         ├── Search View
-        │   ├── Header ("Mergex LeadGen" branding)
+        │   ├── Hero section (branding)
         │   ├── Search input + button
-        │   └── Footer (social links)
+        │   ├── Mode selector (Fast/Auto/Deep)
+        │   ├── Action buttons (Generate/Pause)
+        │   └── Search tags (quick suggestions)
         │
-        └── Results View
-            ├── Header (back button + download/share buttons)
-            ├── Filter bar (search + sort controls)
-            ├── Result cards (clickable → detail modal)
-            ├── Detail modal (phone, maps, website actions)
-            └── Footer (social links)
+        ├── Results View
+        │   ├── Toolbar (results count + Export/Open/Share)
+        │   ├── Filter bar (search + sort controls)
+        │   ├── Result cards (clickable → detail modal)
+        │   └── Detail modal (phone, maps, website actions)
+        │
+        ├── History View
+        │   ├── Search bar (filter)
+        │   ├── History list (tap to load, play to resume, trash to delete)
+        │   └── Pull to refresh
+        │
+        ├── Settings View
+        │   ├── Clear local cache
+        │   ├── Notification permissions
+        │   └── About (version)
+        │
+        ├── Modals
+        │   ├── Info modal (about, contact, links)
+        │   ├── Mode modal (mode details + recommendations)
+        │   └── Detail modal (business actions)
+        │
+        └── Footer Tabs
+            ├── Search tab
+            ├── History tab
+            └── Settings tab
 ```
+
+## Service Files
+
+### `src/services/scraper.js`
+
+Main scraping service with:
+- `search(query, mode, onProgress, resumeState)` — Main entry point
+- `fetchit(url)` — Fetches and parses Google Search HTML
+- `fetchExtraDetails(query, cid)` — Fetches extra details via Google's async endpoint
+- `extractContactInfoBulletproof(rawPayload)` — Parses contact info from raw payload
+- `extractPhone(text)` — Extracts phone number from text
+- `dedup(list)` — Deduplicates results by CID or title+address
+
+Supports three modes:
+- **fast**: Scrapes search pages only, no phone lookup
+- **normal**: Fills missing phones via CID lookup
+- **long**: Enriches ALL results with extra details
+
+Supports pause & resume via `resumeState` object.
+
+### `src/services/excel.js`
+
+Excel export service:
+- `makeExcel(data, query)` — Generates .xlsx file
+- `saveToDownloads(data, query)` — Saves to Downloads folder (native)
+- `shareLastFile(filename)` — Shares via system share sheet
+- `getLastSavedUri()` — Returns last saved file URI
 
 ## Native Plugin Usage
 
@@ -92,19 +147,19 @@ App.vue
 | `@capacitor/local-notifications` | Notify when search/download completes |
 | `@capawesome-team/capacitor-android-foreground-service` | Keep scraping alive when app is backgrounded |
 
-## Dependency Graph
+## Local Cache
 
-```
-HomePage.vue
-├── src/services/scraper.js
-│   └── libphonenumber-js
-├── src/services/excel.js
-│   ├── write-excel-file/browser
-│   ├── @capacitor/filesystem
-│   ├── @capacitor/share
-│   └── @capacitor/local-notifications
-├── @capacitor/core (platform detection)
-├── @capacitor/local-notifications (search complete)
-├── @capawesome-team/capacitor-android-foreground-service
-└── @ionic/vue (UI components)
-```
+The app maintains a local cache for offline access:
+- **Cache key**: `mergex_cache_[hash]`
+- **TTL**: 24 hours
+- **Max entries**: 20 (LRU eviction)
+
+Uses simple hash function (not cryptographic) for key generation.
+
+## Search Modes Summary
+
+| Mode | Speed | Data Completeness | Phone Lookup |
+|------|-------|------------------|-------------|
+| Fast | Fastest (~5s/200) | Basic (names, addresses, ratings, websites) | None |
+| Auto | Medium (~10-20s/200) | Good (fills missing phones) | On-demand |
+| Deep | Slowest (~20-30s/200) | Best (full details) | Always |
