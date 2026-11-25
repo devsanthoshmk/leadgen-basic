@@ -262,11 +262,6 @@ Here's the complete picture of how all the pieces fit together:
 │          No                                  │
 │          |                                   │
 │          v                                   │
-│   App checks: Is it in the cloud? ───── Yes ─── Show cloud results
-│          |                                   │
-│          No                                  │
-│          |                                   │
-│          v                                   │
 │   Scraper fetches Google Search pages        │
 │   (10 results per page, keeps going)         │
 │          |                                   │

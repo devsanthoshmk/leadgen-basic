@@ -631,7 +631,7 @@ This enables:
 
 Mergex LeadGen's architecture is optimized for three things:
 
-1. **Zero infrastructure cost** — Client-side scraping eliminates server compute. No database or cloud server to maintain.
+1. **Zero infrastructure cost** — Searches run on-device, and search history stays in local storage. Android automatic backup is disabled.
 2. **Maximum reliability** — No single server to fail. Each user is their own scraping node with their own IP.
 3. **Minimum complexity** — Native browser APIs (DOMParser, fetch) over external libraries. No headless browsers. No proxy servers. No API keys.
 
