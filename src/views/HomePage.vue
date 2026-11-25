@@ -48,13 +48,13 @@
         <div class="search-hero">
           <div class="hero-badge">SALES INTELLIGENCE</div>
           <h1 class="hero-title">Find Your Next<br/><span class="accent">Qualified Lead</span></h1>
-          <p class="hero-sub">Search businesses by type and location. Export leads with phone, email, and address data for your sales pipeline.</p>
+          <p class="hero-sub">Search businesses by type and location. Export available phone numbers, addresses, and websites.</p>
         </div>
 
         <div class="search-container" :class="{ shake: shaking }">
           <ion-searchbar
             v-model="input"
-            placeholder="e.g. Restaurants in Chennai"
+            placeholder="e.g. Software in Chennai"
             :debounce="0"
             @keyup.enter="doSearch"
             show-clear-button="focus"
@@ -73,6 +73,7 @@
               <button
                 v-for="m in modes"
                 :key="m.id"
+                :disabled="searching"
                 class="mode-option"
                 :class="{ active: searchMode === m.id }"
                 @click="selectMode(m.id)"
@@ -81,8 +82,8 @@
                   <ion-icon :icon="m.icon"></ion-icon>
                 </div>
                 <div class="mode-option-body">
-                  <span class="mode-option-name">{{ m.name }} <span v-if="m.inDevelopment" class="mode-dev-badge">In Dev</span></span>
-                  <span class="mode-option-desc">{{ m.shortDesc }}</span>
+                  <span class="mode-option-name">{{ m.name }}</span>
+                  <span class="mode-option-desc">{{ m.id === 'fast' ? 'Google Maps only' : ({ combined: m.id === 'long' ? 'Both sources, more detail' : 'Google Maps + LinkedIn', linkedin: m.id === 'long' ? 'Up to 5 LinkedIn pages' : 'Up to 3 LinkedIn pages', maps: m.shortDesc })[searchProvider] }}</span>
                 </div>
                 <div v-if="searchMode === m.id" class="mode-check">
                   <ion-icon :icon="checkmarkCircle"></ion-icon>
@@ -91,9 +92,9 @@
             </div>
             <!-- Long mode warning -->
             <transition name="fade">
-              <div v-if="searchMode === 'long'" class="mode-warning">
+              <div v-if="searchMode === 'long' && searchProvider === 'maps'" class="mode-warning">
                 <ion-icon :icon="timeOutline"></ion-icon>
-                <span>Deep mode takes longer and is still in development. It improves address accuracy and slightly increases phone number coverage. Best for small, targeted searches.</span>
+                <span>Deep checks individual places that are missing a phone number. Best for small, targeted searches.</span>
               </div>
             </transition>
           </div>
@@ -110,7 +111,7 @@
                 {{ progressText || 'Finding leads...' }}
               </ion-button>
               <!-- Separate pause button below the progress -->
-              <ion-button expand="block" class="pause-btn" @click="pauseSearch">
+              <ion-button v-if="effectiveProvider === 'maps'" expand="block" class="pause-btn" @click="pauseSearch">
                 <ion-icon :icon="pauseOutline" slot="start"></ion-icon>
                 Pause Search
               </ion-button>
@@ -119,7 +120,7 @@
         </div>
 
   
-        <div class="search-tags">
+        <div v-if="effectiveProvider === 'maps'" class="search-tags">
           <span class="tags-label">Try searching</span>
           <div class="tags-row">
             <span class="tag" @click="input = 'Restaurants in Bangalore'; doSearch()">Restaurants in Bangalore</span>
@@ -150,14 +151,24 @@
           <ion-button fill="clear" size="small" @click="toggleSortDir">
             <ion-icon :icon="sortAsc ? arrowUpOutline : arrowDownOutline"></ion-icon>
           </ion-button>
+          <div class="source-filters" role="group" aria-label="Filter by source">
+            <button v-for="option in sourceOptions" :key="option.value" type="button"
+              :aria-pressed="sourceFilter === option.value" @click="sourceFilter = option.value">
+              {{ option.label }}
+            </button>
+          </div>
         </div>
 
         <!-- Data cards -->
         <div class="cards-container">
           <ion-card v-for="(row, i) in filteredData" :key="i" class="data-card" @click="openDetail(row)">
-            <ion-card-header>
+            <ion-card-header class="lead-card-header">
               <ion-card-title class="card-title">{{ row.title }}</ion-card-title>
               <ion-card-subtitle v-if="row.category">{{ row.category }}</ion-card-subtitle>
+              <span class="source-mark" :title="leadSourceLabel(row)" role="img" :aria-label="leadSourceLabel(row)">
+                <ion-icon v-if="row.source !== 'linkedin'" :icon="locationOutline" aria-hidden="true" />
+                <ion-icon v-if="row.source === 'linkedin' || row.source === 'combined'" :icon="logoLinkedin" aria-hidden="true" />
+              </span>
             </ion-card-header>
             <ion-card-content>
               <div class="card-meta">
@@ -168,9 +179,12 @@
                 <span v-if="row.reviews" class="reviews">
                   ({{ row.reviews }} reviews)
                 </span>
+                <span v-if="row.followers">{{ row.followers }}</span>
+                <span v-if="row.badge">{{ row.badge }}</span>
               </div>
               <p v-if="row.address" class="card-address">{{ row.address }}</p>
               <div class="card-actions">
+                <ion-chip v-if="row.linkedinUrl" outline @click.stop="openUrl(row.linkedinUrl)">LinkedIn profile</ion-chip>
                 <ion-chip v-if="row.completePhoneNumber" outline @click.stop="callPhone(row.completePhoneNumber)" class="lead-chip phone-chip">
                   <ion-icon :icon="callOutline"></ion-icon>
                   <ion-label>{{ row.completePhoneNumber }}</ion-label>
@@ -201,6 +215,8 @@
         </ion-header>
         <ion-content class="ion-padding" v-if="detailRow">
           <h2>{{ detailRow.title }}</h2>
+          <ion-chip outline>{{ leadSourceLabel(detailRow) }}</ion-chip>
+          <p v-if="detailRow.description">{{ detailRow.description }}</p>
           <ion-list>
             <ion-item>
               <ion-label>
@@ -208,7 +224,7 @@
                 <p>{{ detailRow.category || 'N/A' }}</p>
               </ion-label>
             </ion-item>
-            <ion-item>
+            <ion-item v-if="detailRow.source !== 'linkedin'">
               <ion-label>
                 <h3>Rating</h3>
                 <p>
@@ -261,7 +277,7 @@
           </ion-toolbar>
         </ion-header>
         <ion-content class="ion-padding mode-info-content">
-          <p class="mode-info-intro">Choose how thorough your lead search should be. Each mode balances speed against the amount of data you get back.</p>
+          <p class="mode-info-intro">Fast searches Google Maps only. Auto and Deep default to Combined; you can also choose Google Maps or LinkedIn on its own.</p>
 
           <div v-for="m in modes" :key="m.id" class="mode-info-card" :class="{ recommended: m.id === 'normal' }">
             <div class="mode-info-card-header">
@@ -271,10 +287,10 @@
               <div>
                 <h3>{{ m.name }}</h3>
                 <span v-if="m.id === 'normal'" class="mode-recommended-badge">Recommended</span>
-                <span v-if="m.inDevelopment" class="mode-indev-badge">In Development</span>
               </div>
             </div>
             <p class="mode-info-card-desc">{{ m.longDesc }}</p>
+            <p v-if="m.id !== 'fast'" class="mode-info-card-desc">{{ m.id === 'long' ? 'Combined also searches up to five LinkedIn pages.' : 'Combined also searches up to three LinkedIn pages.' }}</p>
             <div class="mode-info-stats">
               <div class="mode-stat">
                 <span class="mode-stat-label">Speed</span>
@@ -299,7 +315,7 @@
 
           <div class="mode-info-tip">
             <ion-icon :icon="bulbOutline"></ion-icon>
-            <p><strong>Pro Tip:</strong> Start with <strong>Normal</strong> mode for everyday prospecting. Switch to <strong>Fast</strong> when you just need names and addresses quickly. Try <strong>Deep</strong> for small targeted searches where address accuracy and phone coverage matter — more features coming soon.</p>
+            <p><strong>Combined:</strong> A unique company name match gets both source icons. Unmatched listings stay separate. If one source fails, results from the other are still shown. LinkedIn requires the USB bridge in this build.</p>
           </div>
         </ion-content>
       </ion-modal>
@@ -360,6 +376,60 @@
       <div v-if="view === 'settings'" class="settings-view">
         <div class="view-header">
           <h2>Settings</h2>
+        </div>
+
+        <div class="settings-section">
+          <h3 class="settings-section-title">LinkedIn Account</h3>
+
+          <!-- Connected state -->
+          <div v-if="linkedInConnected" class="settings-item">
+            <div class="settings-item-info">
+              <span class="settings-item-label">✅ Connected</span>
+              <span class="settings-item-desc">Session saved on this device. LinkedIn and Combined search are active.</span>
+            </div>
+            <ion-button size="small" fill="outline" color="danger" @click="doLinkedInLogout">Sign out</ion-button>
+          </div>
+
+          <!-- Auto sign-in form -->
+          <div v-if="!linkedInConnected" class="li-signin-form">
+            <!-- Notification access tip — hidden when already granted -->
+            <div v-if="!notifAccessGranted" class="li-notif-tip">
+              <span class="li-notif-icon">🔔</span>
+              <div>
+                <strong>Enable notification access</strong> so LeadGen can read the LinkedIn verification code from your email notification automatically.
+                <br><ion-button size="small" fill="outline" style="margin-top:6px" @click="openNotifSettings">Open Notification Settings</ion-button>
+              </div>
+            </div>
+            <p class="li-signin-notice">
+              🔒 Your email and password are used <strong>only to log in</strong> inside a private in-app browser.
+              They are <strong>never stored or sent</strong> anywhere — only the resulting session token is saved,
+              encrypted with Android's hardware security chip (Keystore AES-256-GCM) and readable only by this app on this device.
+            </p>
+            <div class="li-field">
+              <label class="li-label">LinkedIn Email</label>
+              <input class="li-input" type="email" autocomplete="email" inputmode="email"
+                     v-model="liEmail" placeholder="you@example.com" :disabled="liSigning" />
+            </div>
+            <div class="li-field">
+              <label class="li-label">Password</label>
+              <div class="li-pw-row">
+                <input class="li-input" :type="liShowPw ? 'text' : 'password'" autocomplete="current-password"
+                       v-model="liPassword" placeholder="••••••••" :disabled="liSigning" />
+                <button class="li-pw-toggle" @click="liShowPw = !liShowPw" :aria-label="liShowPw ? 'Hide' : 'Show'">
+                  {{ liShowPw ? '🙈' : '👁' }}
+                </button>
+              </div>
+            </div>
+            <div class="li-actions">
+              <ion-button expand="block" :disabled="liSigning || !liEmail || !liPassword" @click="doAutoLogin">
+                <span v-if="!liSigning">Sign in automatically</span>
+                <span v-else>{{ liSigningStatus }}</span>
+              </ion-button>
+              <ion-button expand="block" fill="outline" :disabled="liSigning" @click="doLinkedInLogin">
+                Sign in manually (browser)
+              </ion-button>
+            </div>
+          </div>
         </div>
 
         <div class="settings-section">
@@ -532,7 +602,7 @@ import {
 import {
   logoGithub, logoLinkedin, logoInstagram, logoTwitter, shareSocialOutline,
   downloadOutline, arrowBackOutline, starSharp, starOutline,
-  callOutline, globeOutline, openOutline, navigateOutline,
+  callOutline, globeOutline, openOutline, navigateOutline, locationOutline,
   arrowUpOutline, arrowDownOutline, informationCircleOutline, mailOutline,
   flashOutline, syncOutline, layersOutline, pauseOutline,
   helpCircleOutline, checkmarkCircle, closeCircle, timeOutline, bulbOutline,
@@ -543,6 +613,9 @@ import { Capacitor } from '@capacitor/core';
 import { App } from '@capacitor/app';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { search } from '../services/scraper.js';
+import { searchLinkedIn, hasLinkedInSession, linkedInLogin, clearLinkedInSession, hasNotificationAccess, openNotificationSettings } from '../services/linkedin.js';
+import { mergeLeadSources } from '../services/combined.js';
+import { leadSourceLabel, matchesLeadSource } from '../services/leadSource.js';
 import { makeExcel, shareLastFile, SaveToDownloads } from '../services/excel.js';
 
 // ─── Local Cache helpers ────────────────────────────────────────────────────
@@ -639,6 +712,13 @@ export default {
       lastFilename: '',
       downloadedUri: null,
       filterText: '',
+      sourceFilter: 'all',
+      sourceOptions: [
+        { value: 'all', label: 'All sources' },
+        { value: 'linkedin', label: 'LinkedIn' },
+        { value: 'google-maps', label: 'Google Maps' },
+      ],
+      locationOutline,
       sortBy: 'title',
       sortAsc: true,
       detailOpen: false,
@@ -650,6 +730,14 @@ export default {
       resumeState: null,
       progressText: '',
       searchMode: 'normal',
+      searchProvider: 'combined',
+      linkedInConnected: false,
+      notifAccessGranted: true,
+      liEmail: '',
+      liPassword: '',
+      liShowPw: false,
+      liSigning: false,
+      liSigningStatus: 'Opening LinkedIn…',
       modes: [
         {
           id: 'fast',
@@ -671,15 +759,15 @@ export default {
           id: 'normal',
           name: 'Auto',
           icon: syncOutline,
-          shortDesc: 'Automatically balances speed & data',
-          longDesc: 'Default mode. Automatically finds the right balance between speed and completeness — runs the search first, then fills in missing phone numbers only when needed. Smart and efficient for everyday prospecting.',
+          shortDesc: 'Checks details only if no phones are found',
+          longDesc: 'Default mode. If the main search finds even one phone number, Auto skips all individual lookups. Otherwise it checks each place with a listing ID for a phone number and website.',
           speed: 65,
           data: 75,
           details: [
             { text: 'Business names & addresses', yes: true },
             { text: 'Ratings & reviews', yes: true },
             { text: 'Websites', yes: true },
-            { text: 'Missing phone numbers filled', yes: true },
+            { text: 'Phone lookup if the main search finds none', yes: true },
             { text: 'Full address details', yes: false },
           ],
         },
@@ -687,11 +775,10 @@ export default {
           id: 'long',
           name: 'Deep',
           icon: layersOutline,
-          shortDesc: 'Better accuracy, in development',
-          longDesc: 'Looks up each result individually to get more accurate full addresses and improves the chance of finding phone numbers. More features coming soon as this mode is still being developed.',
+          shortDesc: 'Checks places missing a phone',
+          longDesc: 'Checks each place that has a listing ID but no phone number. Also fills missing addresses and websites when available, without replacing values from the main search.',
           speed: 25,
           data: 65,
-          inDevelopment: true,
           details: [
             { text: 'Business names & addresses', yes: true },
             { text: 'Ratings & reviews', yes: true },
@@ -719,13 +806,18 @@ export default {
     };
   },
   computed: {
+    effectiveProvider() {
+      if (this.searchMode === 'fast') return 'maps';
+      if (!this.linkedInConnected && this.searchProvider !== 'maps') return 'maps';
+      return this.searchProvider;
+    },
     filteredHistory() {
       if (!this.historyFilter) return this.historyItems;
       const q = this.historyFilter.toLowerCase();
       return this.historyItems.filter(h => h.query.toLowerCase().includes(q));
     },
     filteredData() {
-      let data = [...this.row_datas];
+      let data = this.row_datas.filter(row => matchesLeadSource(row, this.sourceFilter));
       if (this.filterText) {
         const q = this.filterText.toLowerCase();
         data = data.filter(r =>
@@ -751,6 +843,8 @@ export default {
   async mounted() {
     if (Capacitor.isNativePlatform()) {
       await this.syncNotificationStatus();
+      this.linkedInConnected = await hasLinkedInSession();
+      this.notifAccessGranted = await hasNotificationAccess();
 
       if (!this.notificationsGranted) {
         const lastAsked = localStorage.getItem('notif_prompt_last');
@@ -807,9 +901,17 @@ export default {
   beforeUnmount() {
     App.removeAllListeners();
   },
+  watch: {
+    view(next, previous) {
+      if (previous === 'results' && next !== 'results') this.sourceFilter = 'all';
+    },
+  },
   methods: {
+    leadSourceLabel,
     selectMode(mode) {
       this.searchMode = mode;
+      // fast always uses maps; auto and deep default to combined
+      this.searchProvider = mode === 'fast' ? 'maps' : 'combined';
     },
     async syncNotificationStatus() {
       try {
@@ -1153,6 +1255,7 @@ export default {
     },
     viewPausedResults(item) {
       this.row_datas = (item._partialResults || []).map(r => ({
+        ...r,
         title: r.title || '',
         cid: r.cid || '',
         stars: r.stars || 0,
@@ -1169,6 +1272,7 @@ export default {
       this.view = 'results';
     },
     async resumeFromHistory(item) {
+      this.searchProvider = 'maps';
       this.input = item.query;
       this.searchMode = item.mode || 'normal';
       this.resumeState = item._resumeState;
@@ -1207,6 +1311,62 @@ export default {
       await alert.present();
     },
     // ─── Settings actions ────────────────────────────────────────────────
+    async doAutoLogin() {
+      if (!this.liEmail || !this.liPassword) return;
+      this.liSigning = true;
+      this.liSigningStatus = 'Opening LinkedIn…';
+      try {
+        // Brief delay so the status text renders before the Activity opens
+        await new Promise(r => setTimeout(r, 120));
+        this.liSigningStatus = 'Signing in…';
+        await linkedInLogin({ email: this.liEmail.trim(), password: this.liPassword });
+        this.liEmail    = '';
+        this.liPassword = '';
+        this.liShowPw   = false;
+        this.linkedInConnected = true;
+        const toast = await toastController.create({ message: '✅ LinkedIn connected. Combined and LinkedIn search are ready.', duration: 3500, color: 'success' });
+        await toast.present();
+      } catch (err) {
+        const msg = err?.message || String(err);
+        const toast = await toastController.create({
+          message: msg.includes('challenge') || msg.includes('checkpoint')
+            ? 'LinkedIn asked for a verification code. Use "Sign in manually" to complete it.'
+            : `LinkedIn sign-in failed: ${msg}`,
+          duration: 5000, color: 'warning',
+        });
+        await toast.present();
+      } finally {
+        this.liSigning = false;
+        this.liSigningStatus = 'Opening LinkedIn…';
+      }
+    },
+    async doLinkedInLogin() {
+      this.liSigning = true;
+      try {
+        await linkedInLogin({});
+        this.linkedInConnected = true;
+        const toast = await toastController.create({ message: '✅ LinkedIn connected.', duration: 3000, color: 'success' });
+        await toast.present();
+      } catch {
+        const toast = await toastController.create({ message: 'Sign-in cancelled.', duration: 2000, color: 'medium' });
+        await toast.present();
+      } finally {
+        this.liSigning = false;
+      }
+    },
+    async doLinkedInLogout() {
+      await clearLinkedInSession();
+      this.linkedInConnected = false;
+      const toast = await toastController.create({ message: 'LinkedIn session removed.', duration: 2000, color: 'medium' });
+      await toast.present();
+    },
+    async openNotifSettings() {
+      await openNotificationSettings();
+      // Re-check after returning from settings
+      setTimeout(async () => {
+        this.notifAccessGranted = await hasNotificationAccess();
+      }, 1000);
+    },
     async clearLocalCache() {
       const alert = await alertController.create({
         header: 'Clear Cache',
@@ -1227,9 +1387,47 @@ export default {
     },
     // ─── Resume (handled in history tab) ───────────────────────────────
     async doSearch() {
+      if (this.searching) return;
       if (!this.input.trim()) {
         this.shaking = true;
         setTimeout(() => { this.shaking = false; }, 500);
+        return;
+      }
+
+      const provider = this.effectiveProvider;
+      if (provider !== 'maps') {
+        this.searching = true;
+        try {
+          const query = this.input.trim();
+          const [, keywords, city] = query.match(/^(.+)\s+in\s+(.+)$/i) ?? ['', query, ''];
+          this.progressText = provider === 'combined' ? 'Searching Google Maps and LinkedIn…' : 'Searching LinkedIn…';
+          const [maps, linkedin] = await Promise.allSettled([
+            provider === 'combined' ? search(query, this.searchMode).then(result => result.results) : [],
+            searchLinkedIn(keywords, city, this.searchMode),
+          ]);
+          const errors = [maps, linkedin].flatMap((result, i) => result.status === 'rejected'
+            ? [`${i === 0 ? 'Google Maps' : 'LinkedIn'}: ${result.reason.message}`] : []);
+          const rows = mergeLeadSources(maps.value ?? [], linkedin.value ?? []);
+          if (!rows.length) throw new Error(errors.join(' ') || 'No leads found for this search.');
+          if (this.view !== 'search') return;
+          this.viewStack.push('search');
+          this.row_datas = rows;
+          this.resumeState = null;
+          this.resultSource = null;
+          this.showShare = false;
+          this.downloadedUri = null;
+          this.view = 'results';
+          if (errors.length) {
+            const toast = await toastController.create({ message: errors.join(' '), duration: 5500, color: 'warning' });
+            await toast.present();
+          }
+        } catch (error) {
+          const toast = await toastController.create({ message: error.message, duration: 4500, color: 'warning' });
+          await toast.present();
+        } finally {
+          this.searching = false;
+          this.progressText = '';
+        }
         return;
       }
 
@@ -1265,8 +1463,8 @@ export default {
       if (this.searchMode === 'long' && !this.resumeState) {
         const confirmed = await new Promise(resolve => {
           alertController.create({
-            header: 'Deep Search (In Development)',
-            message: 'Deep mode looks up each result individually for better addresses and phone numbers. It takes longer and is still being improved. Best for small, targeted queries. Continue?',
+            header: 'Deep Search',
+            message: 'Deep looks up places that are missing a phone number. It may also fill in missing addresses and websites. Continue?',
             buttons: [
               { text: 'Cancel', role: 'cancel', handler: () => resolve(false) },
               { text: 'Continue', handler: () => resolve(true) },
@@ -1748,6 +1946,7 @@ export default {
 }
 .filter-bar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   padding: 4px 8px;
   gap: 4px;
@@ -1759,6 +1958,7 @@ export default {
 }
 .filter-search {
   flex: 1;
+  min-width: 0;
   --background: #252525;
   --border-radius: 8px;
   --color: #f0f0f0;
@@ -1769,6 +1969,32 @@ export default {
   max-width: 120px;
   font-size: 14px;
   color: #ccc;
+}
+.source-filters {
+  flex: 0 0 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 0;
+}
+.source-filters button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid #454545;
+  border-radius: 8px;
+  background: transparent;
+  color: #ddd;
+  font: inherit;
+  font-size: 13px;
+}
+.source-filters button[aria-pressed='true'] {
+  background: #e8ff00;
+  border-color: #e8ff00;
+  color: #141414;
+}
+.source-filters button:focus-visible {
+  outline: 2px solid #e8ff00;
+  outline-offset: 2px;
 }
 
 .cards-container {
@@ -1784,6 +2010,27 @@ export default {
 }
 .data-card:hover {
   border-color: #E8FF00;
+}
+.lead-card-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 8px;
+}
+.lead-card-header ion-card-subtitle {
+  grid-column: 1;
+  grid-row: 2;
+}
+.source-mark {
+  grid-column: 2;
+  grid-row: 1;
+  display: inline-flex;
+  gap: 4px;
+  padding: 5px;
+  align-self: start;
+  color: #e8ff00;
+  background: #282b17;
+  border-radius: 6px;
+  font-size: 16px;
 }
 .card-title {
   font-size: 16px;
@@ -2233,6 +2480,89 @@ export default {
 .settings-item-desc {
   font-size: 12px;
   color: #888;
+}
+
+/* LinkedIn credential form */
+.li-notif-tip {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  background: rgba(10, 102, 194, 0.08);
+  border: 1px solid rgba(10, 102, 194, 0.25);
+  border-radius: 8px;
+  padding: 12px;
+  font-size: 12px;
+  color: #9a9a9a;
+  line-height: 1.6;
+}
+.li-notif-icon { font-size: 20px; flex-shrink: 0; }
+.li-notif-tip strong { color: #c8e6fa; }
+
+.li-signin-form {
+  background: #1A1A1A;
+  border: 1px solid #252525;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.li-signin-notice {
+  font-size: 12px;
+  color: #9a9a9a;
+  line-height: 1.6;
+  margin: 0;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 8px;
+  border-left: 3px solid #0a66c2;
+}
+.li-signin-notice strong { color: #c8e6fa; }
+.li-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.li-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #aaa;
+  letter-spacing: 0.03em;
+}
+.li-input {
+  width: 100%;
+  background: #111;
+  border: 1px solid #333;
+  border-radius: 8px;
+  color: #f0f0f0;
+  font-size: 15px;
+  padding: 10px 12px;
+  outline: none;
+  box-sizing: border-box;
+  -webkit-appearance: none;
+}
+.li-input:focus { border-color: #0a66c2; }
+.li-input:disabled { opacity: 0.5; }
+.li-pw-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.li-pw-toggle {
+  background: none;
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: #888;
+  cursor: pointer;
+  font-size: 16px;
+  flex-shrink: 0;
+}
+.li-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
 }
 
 /* Info Modal */
