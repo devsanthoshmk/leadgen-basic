@@ -1,3 +1,5 @@
+import { fetchMapsPage, mapsPageSize, resolveMapsSearch } from './mapsV2.js';
+
 /**
  * @module scraper
  * @description Google Local Search scraper that extracts business listings
@@ -8,9 +10,8 @@
  * | Mode     | Speed  | Data Completeness | Description                                      |
  * |----------|--------|-------------------|--------------------------------------------------|
  * | "fast"   | Fastest| Basic only        | Scrapes search pages only. Skips phone fallback.  |
- * | "normal" | Medium | Good              | Default. Fetches missing phones via CID lookup.   |
- * | "long"   | Slowest| Maximum           | Fetches extra details for ALL results (full       |
- * |          |        |                   | address, phone, hours, etc.)                      |
+ * | "normal" | Medium | Good              | Looks up phones only if primary search finds none. |
+ * | "long"   | Slowest| Maximum           | Looks up places missing a phone; fills address and website gaps. |
  *
  * ## Usage
  *
@@ -99,7 +100,8 @@ export async function extractContactInfoBulletproof(rawPayload) {
 
   const result = {
     address: null,
-    phoneNumbers: []
+    phoneNumbers: [],
+    website: null,
   };
 
   function getInfoUsingXPath(labelName) {
@@ -162,9 +164,13 @@ export async function extractContactInfoBulletproof(rawPayload) {
     // FIX 2: Removed the single space from the regex so it doesn't split "093844 60454"
     const numbers = phoneRaw.split(/(?:\s{2,}|\u00A0{2,}|,|\||\/)/);
     result.phoneNumbers = numbers
-      .map(num => num.trim())
-      .filter(num => num.length > 0);
+      .map(extractPhone)
+      .filter(Boolean);
   }
+
+  result.website = Array.from(document.querySelectorAll('a[href] span'))
+    .find(span => span.textContent.trim() === 'Website' && /^https?:\/\//i.test(span.closest('a').getAttribute('href')))
+    ?.closest('a').getAttribute('href') ?? null;
 
   return result;
 }
@@ -218,6 +224,9 @@ async function fetchit(url) {
     const doc = await parseHTML(htmlText);
 
     const searchEl = doc.querySelector('#search');
+    if (!searchEl && doc.querySelector('a[href*="/httpservice/retry/enablejs"]')) {
+      throw Object.assign(new Error('Google returned a JavaScript-required page instead of listings.'), { code: 'MAPS_INTERSTITIAL' });
+    }
     const items = searchEl ? searchEl.querySelectorAll('.VkpGBb') : null;
     if (!items) return []; 
     
@@ -236,10 +245,10 @@ async function fetchit(url) {
       };
 
       // --- 0. EXTRACT DATA-CID ---
-      const cidElement = item.querySelector('[data-cid]');
-      if (cidElement) {
-        row.cid = cidElement.getAttribute('data-cid');
-      }
+      const allLinks = Array.from(item.querySelectorAll('a[href]'));
+      row.cid = item.getAttribute('data-cid') || item.querySelector('[data-cid]')?.getAttribute('data-cid') ||
+        item.getAttribute('data-ludocid') || item.querySelector('[data-ludocid]')?.getAttribute('data-ludocid') ||
+        allLinks.map(a => a.getAttribute('href').match(/[?&]ludocid=(\d+)(?:[&#]|$)/)?.[1]).find(Boolean) || '';
 
       const titleEl = item.querySelector('[role="heading"]');
       if (titleEl) {
@@ -247,7 +256,6 @@ async function fetchit(url) {
       }
 
       // --- 1. NEW STRATEGY: ADDRESS FROM DIRECTIONS URL ---
-      const allLinks = Array.from(item.querySelectorAll('a'));
       const directionsLink = allLinks.find(a => a.getAttribute('href')?.startsWith('/maps/dir/'));
       
       if (directionsLink) {
@@ -255,7 +263,7 @@ async function fetchit(url) {
         try {
           const destSegment = href.split('/data=')[0].split('/').pop();
           if (destSegment) {
-            let fullAddress = decodeURIComponent(destSegment).replace(/\+/g, ' ').trim();
+            let fullAddress = decodeURIComponent(destSegment.replace(/\+/g, ' ')).trim();
             if (row.title && row.title !== 'N/A') {
               if (fullAddress.startsWith(row.title)) {
                 fullAddress = fullAddress.substring(row.title.length).replace(/^[, \-]+/, '').trim();
@@ -284,7 +292,7 @@ async function fetchit(url) {
       // --- 3. TEXT PARSING ---
       const detailsDiv = item.querySelector('.rllt__details');
       if (detailsDiv) {
-        const lines = Array.from(detailsDiv.children); 
+        const lines = Array.from(detailsDiv.querySelectorAll(':scope > *, div')).filter(line => !line.querySelector('div'));
         
         lines.forEach(line => {
           if (line.getAttribute('role') === 'heading' || line.querySelector('[role="heading"]')) return;
@@ -292,7 +300,7 @@ async function fetchit(url) {
           const text = line.textContent.replace(/\s+/g, ' ').trim();
           if (!text) return;
 
-          if (line.querySelector('[role="img"]') || text.match(/^\d\.\d/)) {
+          if (line.querySelector('.yi40Hd, [role="img"], [aria-hidden="true"]') || /^\d\.\d/.test(text)) {
             const starSpan = line.querySelector('.yi40Hd') || line.querySelector('[aria-hidden="true"]');
             if (starSpan) row.stars = parseFloat(starSpan.textContent) || 0;
             
@@ -327,13 +335,16 @@ async function fetchit(url) {
         });
       }
 
+      const telLink = item.querySelector('a[href^="tel:"]');
+      if (telLink) row.completePhoneNumber = extractPhone(telLink.getAttribute('href').slice(4)) || row.completePhoneNumber;
+
       scrapedData.push(row);
     });
     
     return scrapedData;
   } catch (error) {
-    console.error('Error fetching data:', error);
-    return [];
+    if (error.code !== 'MAPS_INTERSTITIAL') console.error('Error fetching data:', error);
+    throw error;
   }
 }
 
@@ -384,9 +395,10 @@ export async function search(query, mode = 'normal', onProgress = null, resumeSt
   // --- Restore state from a previous paused run, or start fresh ---
   let fullList = resumeState ? [...resumeState.partialResults] : [];
   let pagination = resumeState ? resumeState.pagination : 0;
-  let pageNum = resumeState ? Math.floor(resumeState.pagination / 10) : 0;
+  let mapsSearchUrl = resumeState?.mapsSearchUrl ?? null;
+  let pageNum = Math.floor(pagination / (mapsSearchUrl ? mapsPageSize : 10));
   const startInEnrich = resumeState?.phase === 'enrich';
-  let enrichStartIndex = resumeState?.enrichIndex ?? 0;
+  const enrichStartIndex = resumeState?.enrichIndex ?? 0;
 
   // Phase 1: Main Search Loop (skipped if resuming into enrich phase)
   if (!startInEnrich) {
@@ -398,7 +410,7 @@ export async function search(query, mode = 'normal', onProgress = null, resumeSt
           const uniqueResults = dedup(fullList);
           return {
             results: uniqueResults,
-            resumeState: { query, mode, pagination, phase: 'search', enrichIndex: 0, partialResults: uniqueResults },
+            resumeState: { query, mode, pagination, mapsSearchUrl, phase: 'search', enrichIndex: 0, partialResults: uniqueResults },
           };
         }
       }
@@ -409,12 +421,27 @@ export async function search(query, mode = 'normal', onProgress = null, resumeSt
         start: pagination,
         udm: '1',
       }).toString();
-      console.log(`[${mode}] Fetching Search Page: ${url}`);
+      console.log(`[${mode}] Fetching ${mapsSearchUrl ? 'Maps' : 'Search'} page at offset ${pagination}`);
 
-      const result = await fetchit(url.toString());
+      let result;
+      if (mapsSearchUrl) {
+        result = await fetchMapsPage(mapsSearchUrl, pagination);
+      } else {
+        try {
+          result = await fetchit(url.toString());
+        } catch (error) {
+          if (error.code !== 'MAPS_INTERSTITIAL' || pagination !== 0) throw error;
+        }
+        if (!result?.length && pagination === 0) {
+          mapsSearchUrl = await resolveMapsSearch(query);
+          result = await fetchMapsPage(mapsSearchUrl, 0);
+        }
+      }
       if (result?.length > 0) {
-        pagination += 10;
+        const seen = new Set(fullList.map(listingKey));
         fullList.push(...result);
+        if (result.every(item => seen.has(listingKey(item)))) break;
+        pagination += mapsSearchUrl ? mapsPageSize : 10;
       } else {
         break;
       }
@@ -435,18 +462,18 @@ export async function search(query, mode = 'normal', onProgress = null, resumeSt
 
   // Normal mode: skip enrichment entirely if ANY result already has a phone number
   const anyPhoneFound = uniqueResults.some(item => !!item.completePhoneNumber);
-  if (mode === 'normal' && anyPhoneFound) {
+  if (mode === 'normal' && !startInEnrich && anyPhoneFound) {
     console.log('[normal] Phone numbers found in search results, skipping enrichment.');
     return { results: uniqueResults, resumeState: null };
   }
 
   // Phase 2: Extra detail fetches via CID
-  const toEnrich = uniqueResults.filter(item => !!item.cid);
-  let enriched = enrichStartIndex;
+  const toEnrich = uniqueResults.slice(enrichStartIndex).filter(item => item.cid && !item.completePhoneNumber);
+  let enriched = 0;
 
   for (let i = enrichStartIndex; i < uniqueResults.length; i++) {
     const item = uniqueResults[i];
-    if (!item.cid) continue;
+    if (!item.cid || item.completePhoneNumber) continue;
 
     enriched++;
     if (onProgress) {
@@ -471,11 +498,10 @@ export async function search(query, mode = 'normal', onProgress = null, resumeSt
         item.completePhoneNumber = extraInfo.phoneNumbers[0];
       }
 
-      if (mode === 'long' && extraInfo.address) {
-        item.address = extraInfo.address;
-      } else if (extraInfo.address && !item.address) {
+      if (mode === 'long' && extraInfo.address && !item.address) {
         item.address = extraInfo.address;
       }
+      if (!item.url && extraInfo.website) item.url = extraInfo.website;
     } catch (err) {
       console.error(`Failed to parse extra info for CID ${item.cid}:`, err);
     }
@@ -485,6 +511,19 @@ export async function search(query, mode = 'normal', onProgress = null, resumeSt
 }
 
 /** Deduplicates results by CID or title+address composite key. */
+function listingKey(item) {
+  return item.cid || item.placeId || JSON.stringify([item.title, item.address]);
+}
+
 function dedup(list) {
-  return Array.from(new Map(list.map(item => [item.cid || (item.title + item.address), item])).values());
+  const rows = new Map();
+  for (const item of list) {
+    const key = listingKey(item);
+    const prior = rows.get(key);
+    if (!prior) rows.set(key, { ...item, source: 'google-maps' });
+    else for (const field of Object.keys(item)) {
+      if (!prior[field] && item[field]) prior[field] = item[field];
+    }
+  }
+  return [...rows.values()];
 }
