@@ -8,6 +8,9 @@ export const SaveToDownloads = registerPlugin('SaveToDownloads');
 const schema = [
   { column: 'Name', type: String, value: (row) => row.title, width: 30 },
   { column: 'Source', type: String, value: leadSourceLabel, width: 25 },
+  { column: 'Lead Score', type: Number, value: (row) => row.score, width: 14 },
+  { column: 'Score Basis', type: String, value: (row) => row.scoreBasis, width: 20 },
+  { column: 'Score Band', type: String, value: (row) => row.segment, width: 14 },
   { column: 'Category', type: String, value: (row) => row.category, width: 20 },
   { column: 'No. Of Reviews', type: Number, value: (row) => row.reviews, width: 15 },
   { column: 'Stars', type: Number, value: (row) => row.stars, width: 10 },

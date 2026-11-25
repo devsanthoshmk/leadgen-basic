@@ -143,6 +143,7 @@
             class="filter-search"
           ></ion-searchbar>
           <ion-select v-model="sortBy" interface="popover" placeholder="Sort by" class="sort-select">
+            <ion-select-option value="score">Lead score</ion-select-option>
             <ion-select-option value="title">Name</ion-select-option>
             <ion-select-option value="stars">Stars</ion-select-option>
             <ion-select-option value="reviews">Reviews</ion-select-option>
@@ -172,6 +173,7 @@
             </ion-card-header>
             <ion-card-content>
               <div class="card-meta">
+                <ion-chip outline class="lead-chip">{{ row.score }}/100 · {{ row.scoreBasis }}</ion-chip>
                 <span v-if="row.stars" class="stars">
                   <ion-icon :icon="starIcon" color="warning"></ion-icon>
                   {{ row.stars }}
@@ -215,6 +217,7 @@
         </ion-header>
         <ion-content class="ion-padding" v-if="detailRow">
           <h2>{{ detailRow.title }}</h2>
+          <p>{{ detailRow.score }}/100 · {{ detailRow.scoreBasis }} · {{ detailRow.segment }} score band</p>
           <ion-chip outline>{{ leadSourceLabel(detailRow) }}</ion-chip>
           <p v-if="detailRow.description">{{ detailRow.description }}</p>
           <ion-list>
@@ -616,6 +619,7 @@ import { search } from '../services/scraper.js';
 import { searchLinkedIn, hasLinkedInSession, linkedInLogin, clearLinkedInSession, hasNotificationAccess, openNotificationSettings } from '../services/linkedin.js';
 import { mergeLeadSources } from '../services/combined.js';
 import { leadSourceLabel, matchesLeadSource } from '../services/leadSource.js';
+import { withLeadScore } from '../services/leadScoring.js';
 import { makeExcel, shareLastFile, SaveToDownloads } from '../services/excel.js';
 
 // ─── Local Cache helpers ────────────────────────────────────────────────────
@@ -816,8 +820,11 @@ export default {
       const q = this.historyFilter.toLowerCase();
       return this.historyItems.filter(h => h.query.toLowerCase().includes(q));
     },
+    scoredData() {
+      return this.row_datas.map(row => withLeadScore(row, this.input));
+    },
     filteredData() {
-      let data = this.row_datas.filter(row => matchesLeadSource(row, this.sourceFilter));
+      let data = this.scoredData.filter(row => matchesLeadSource(row, this.sourceFilter));
       if (this.filterText) {
         const q = this.filterText.toLowerCase();
         data = data.filter(r =>
@@ -902,6 +909,9 @@ export default {
     App.removeAllListeners();
   },
   watch: {
+    sortBy(key) {
+      this.sortAsc = key !== 'score';
+    },
     view(next, previous) {
       if (previous === 'results' && next !== 'results') this.sourceFilter = 'all';
     },
@@ -1570,7 +1580,7 @@ export default {
     },
     async downloadExcel() {
       try {
-        const result = await makeExcel(this.row_datas, this.input);
+        const result = await makeExcel(this.scoredData, this.input);
         this.lastFilename = result.filename;
         if (Capacitor.isNativePlatform()) {
           this.showShare = true;
@@ -2039,6 +2049,7 @@ export default {
 }
 .card-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   margin-bottom: 4px;
