@@ -1,8 +1,10 @@
+import { scoreTokens, splitScoreQuery } from './leadScoring.js';
+
 const companyKey = name => (name ?? '').normalize('NFKC').toLowerCase()
   .replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
   .replace(/\s+(?:(?:private|pvt)\s+)?(?:limited|ltd|inc|llc|llp)$/, '');
 
-export function mergeLeadSources(maps, linkedin) {
+export function mergeLeadSources(maps, linkedin, query = '') {
   function index(rows) {
     const keys = new Map();
     rows.forEach((row, i) => {
@@ -18,9 +20,15 @@ export function mergeLeadSources(maps, linkedin) {
     const key = companyKey(row.title);
     const j = linkedinKeys.get(key);
     if (mapsKeys.get(key) !== i || j == null || j < 0) return row;
-    const { companyId, linkedinUrl, followers, description, badge } = linkedin[j];
+    const { companyId, linkedinUrl, followers, description, badge, category: linkedinCategory } = linkedin[j];
+    const location = linkedinCategory?.split('•')[1];
+    const city = splitScoreQuery(query).city || location?.split(',')[0];
+    const cityWords = scoreTokens(city);
+    const addressWords = scoreTokens(row.address);
+    const profileWords = scoreTokens(location);
+    if (!cityWords.length || !cityWords.every(word => addressWords.includes(word) && profileWords.includes(word))) return row;
     used.add(j);
-    return { ...row, source: 'combined', companyId, linkedinUrl, followers, description, badge };
+    return { ...row, source: 'combined', matchVerified: true, companyId, linkedinUrl, followers, description, badge, linkedinCategory };
   });
   return [...merged, ...linkedin.filter((_, i) => !used.has(i))];
 }

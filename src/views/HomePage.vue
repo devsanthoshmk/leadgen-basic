@@ -143,7 +143,7 @@
             class="filter-search"
           ></ion-searchbar>
           <ion-select v-model="sortBy" interface="popover" placeholder="Sort by" class="sort-select">
-            <ion-select-option value="score">Lead score</ion-select-option>
+            <ion-select-option value="score">Outreach priority</ion-select-option>
             <ion-select-option value="title">Name</ion-select-option>
             <ion-select-option value="stars">Stars</ion-select-option>
             <ion-select-option value="reviews">Reviews</ion-select-option>
@@ -173,7 +173,7 @@
             </ion-card-header>
             <ion-card-content>
               <div class="card-meta">
-                <ion-chip outline class="lead-chip">{{ row.score }}/100 · {{ row.scoreBasis }}</ion-chip>
+                <ion-chip outline class="lead-chip">{{ row.score }}/100 · {{ row.segment }} priority</ion-chip>
                 <span v-if="row.stars" class="stars">
                   <ion-icon :icon="starIcon" color="warning"></ion-icon>
                   {{ row.stars }}
@@ -184,6 +184,7 @@
                 <span v-if="row.followers">{{ row.followers }}</span>
                 <span v-if="row.badge">{{ row.badge }}</span>
               </div>
+              <p class="card-address">{{ row.scoreBasis }}</p>
               <p v-if="row.address" class="card-address">{{ row.address }}</p>
               <div class="card-actions">
                 <ion-chip v-if="row.linkedinUrl" outline @click.stop="openUrl(row.linkedinUrl)">LinkedIn profile</ion-chip>
@@ -217,7 +218,9 @@
         </ion-header>
         <ion-content class="ion-padding" v-if="detailRow">
           <h2>{{ detailRow.title }}</h2>
-          <p>{{ detailRow.score }}/100 · {{ detailRow.scoreBasis }} · {{ detailRow.segment }} score band</p>
+          <p>{{ detailRow.score }}/100 · {{ detailRow.segment }} outreach priority</p>
+          <p>{{ detailRow.scoreBasis }} · {{ detailRow.evidenceCoverage }} evidence coverage</p>
+          <p>Search fit {{ detailRow.scoreBreakdown.searchFit }}/45 · Reachability {{ detailRow.scoreBreakdown.reachability }}/35 · Credibility {{ detailRow.scoreBreakdown.credibility }}/20</p>
           <ion-chip outline>{{ leadSourceLabel(detailRow) }}</ion-chip>
           <p v-if="detailRow.description">{{ detailRow.description }}</p>
           <ion-list>
@@ -318,7 +321,7 @@
 
           <div class="mode-info-tip">
             <ion-icon :icon="bulbOutline"></ion-icon>
-            <p><strong>Combined:</strong> A unique company name match gets both source icons. Unmatched listings stay separate. If one source fails, results from the other are still shown. LinkedIn requires the USB bridge in this build.</p>
+            <p><strong>Combined:</strong> Listings get both source icons only when a unique company name and city match. Unmatched listings stay separate. If one source fails, results from the other are still shown.</p>
           </div>
         </ion-content>
       </ion-modal>
@@ -723,8 +726,8 @@ export default {
         { value: 'google-maps', label: 'Google Maps' },
       ],
       locationOutline,
-      sortBy: 'title',
-      sortAsc: true,
+      sortBy: 'score',
+      sortAsc: false,
       detailOpen: false,
       detailRow: null,
       infoOpen: false,
@@ -1417,7 +1420,7 @@ export default {
           ]);
           const errors = [maps, linkedin].flatMap((result, i) => result.status === 'rejected'
             ? [`${i === 0 ? 'Google Maps' : 'LinkedIn'}: ${result.reason.message}`] : []);
-          const rows = mergeLeadSources(maps.value ?? [], linkedin.value ?? []);
+          const rows = mergeLeadSources(maps.value ?? [], linkedin.value ?? [], query);
           if (!rows.length) throw new Error(errors.join(' ') || 'No leads found for this search.');
           if (this.view !== 'search') return;
           this.viewStack.push('search');

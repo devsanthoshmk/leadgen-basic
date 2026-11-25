@@ -1,8 +1,11 @@
-# Lead scoring
+# Outreach Priority
 
-Results show a score out of 100. Choose **Lead score** in the sort menu to see higher scores first. Excel includes the score, its basis, and its band. Scoring runs locally, including for existing saved results, and keeps any valid numeric score already supplied.
+Maps, LinkedIn, and Combined results use the same 100-point scale. Higher priority means the available evidence makes a lead more relevant and easier to act on; it is not a conversion prediction.
 
-- **Maps and Combined:** Uses mapScraper's review (30 points), rating (25), website (30), and phone (15) weights. A listed website earns 10 points; each available website enrichment flag earns another 5. Missing signals earn no points. Attaching a LinkedIn profile does not change the Maps score.
-- **LinkedIn only:** Keyword and optional city fit account for up to 80 points; followers account for up to 20. Name and industry matches carry more weight than words found only in the description. Hiring badges are not scored.
+- **Search fit (45):** category first, then name and description as weaker signals. If a city was requested, 10 of the 45 points are for location. Common aliases such as Bengaluru/Bangalore and gym/fitness studio are normalized.
+- **Reachability (35):** listed phone (17), business website (12, or 5 for a known social/directory site), LinkedIn company page (4), and address (2). Missing information earns no points but does not mean a channel does not exist. A listed channel is not independently verified.
+- **Credibility (20):** review counts and followers have diminishing returns, ratings are discounted when review counts are low, and LinkedIn followers can contribute at most 9 points on their own. Combined results use the stronger source plus a fraction of the weaker one, capped at 20.
 
-Maps scores and LinkedIn match scores measure different things; neither predicts buying intent. Bands are Micro (<25), Small (<50), Medium (<75), and Large (75+), not estimates of company size.
+Combined matching requires a unique normalized name and corroborating city evidence. Older Combined rows without that evidence are scored using their Maps fields only. Scores are recalculated locally; Excel includes the formula version, reasons, priority band, and evidence coverage. Coverage describes the available data, not the probability that a lead is good.
+
+The initial weights should be checked against manually labeled top results before treating the ranking as calibrated.

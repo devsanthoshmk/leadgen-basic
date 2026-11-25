@@ -1,44 +1,83 @@
-const number = value => {
-  const parsed = typeof value === 'string' || typeof value === 'number' ? Number(value) : NaN;
-  return Number.isFinite(parsed) ? parsed : 0;
-};
+const text = value => typeof value === 'string' ? value.trim() : '';
+const number = value => (typeof value === 'number' || typeof value === 'string') && Number.isFinite(Number(value)) ? Number(value) : 0;
+const aliases = [
+  [/\b(?:gyms?|fitness (?:centers?|centres?|studios?))\b/g, 'gym'],
+  [/\b(?:cafes?|coffee shops?)\b/g, 'cafe'],
+  [/\b(?:bengaluru|bangalore)\b/g, 'bangalore'],
+  [/\b(?:madras|chennai)\b/g, 'chennai'],
+  [/\b(?:saas|software development|software companies)\b/g, 'software'],
+];
+const noise = new Set(['a', 'an', 'the', 'and', 'in', 'near', 'best', 'top', 'company', 'companies']);
 
-const points = (value, tiers) => tiers.find(([minimum]) => value >= minimum)?.[1] ?? 0;
-const tokens = value => String(value ?? '').toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
-const overlap = (words, text) => {
-  if (!words.length) return 0;
-  const available = new Set(tokens(text));
-  return words.filter(word => available.has(word)).length / words.length;
-};
-
-function linkedinScore(row, query) {
-  const [, keyword, city = ''] = query.trim().match(/^(.+?)\s+in\s+(.+)$/i) ?? ['', query];
-  const words = [...new Set(tokens(keyword))];
-  const titleFit = overlap(words, `${row.title ?? ''} ${row.category ?? ''}`);
-  const widerFit = overlap(words, `${row.title ?? ''} ${row.category ?? ''} ${row.description ?? ''}`);
-  const location = (row.category ?? '').split('•').pop();
-  const followers = String(row.followers ?? '').trim().match(/^(\d+(?:,\d{3})*(?:\.\d+)?)\s*([kmb])?\s*(?:followers?)?$/i);
-  const count = followers ? number(followers[1].replace(/,/g, '')) * ({ k: 1e3, m: 1e6, b: 1e9 }[followers[2]?.toLowerCase()] ?? 1) : 0;
-  return (city ? 45 * titleFit + 15 * widerFit + 20 * overlap(tokens(city), location) : 60 * titleFit + 20 * widerFit) +
-    points(count, [[10000, 20], [1000, 15], [100, 10], [1, 5]]);
+export function scoreTokens(value) {
+  let normalized = text(value).normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase();
+  for (const [pattern, replacement] of aliases) normalized = normalized.replace(pattern, replacement);
+  return [...new Set((normalized.match(/[\p{L}\p{N}]+/gu) ?? []).filter(word => !noise.has(word)))];
 }
 
-function mapsScore(row) {
-  const reviews = points(number(row.reviews), [[500, 30], [200, 24], [100, 18], [50, 12], [10, 7], [1, 3]]);
-  const rating = number(row.stars);
-  const stars = points(rating, [[4.5, 25], [4, 20], [3.5, 15], [3, 10]]) || (rating > 0 ? 5 : 0);
-  let website = row.has_website === true || Boolean(row.url?.trim() || row.domain?.trim()) ? 10 : 0;
-  for (const key of ['domain_valid', 'web_has_contact', 'web_has_services', 'web_is_modern']) {
-    if (row[key] === true) website += 5;
-  }
-  const phone = row.has_phone === true || Boolean(row.completePhoneNumber?.trim() || row.phoneNumber?.trim()) ? 15 : 0;
-  return reviews + stars + website + phone;
+export function splitScoreQuery(value) {
+  const query = text(value);
+  const [, keyword, city = ''] = query.match(/^(.+)\s+in\s+(.+)$/i) ?? ['', query];
+  return { keyword, city };
+}
+
+const overlap = (words, candidate) => {
+  const available = new Set(scoreTokens(candidate));
+  return words.length ? words.filter(word => available.has(word)).length / words.length : 0;
+};
+const round = value => Math.round(value * 10) / 10;
+const logPoints = (count, ceiling, max) => max * Math.min(1, Math.log1p(Math.max(0, count)) / Math.log1p(ceiling));
+
+function urlHost(value) {
+  try {
+    const url = new URL(text(value));
+    return /^https?:$/.test(url.protocol) && !url.username && !url.password ? url.hostname.toLowerCase() : '';
+  } catch { return ''; }
+}
+
+function followerCount(value) {
+  const match = String(value ?? '').trim().match(/^(\d+(?:,\d{3})*(?:\.\d+)?)\s*([kmb])?\s*(?:followers?)?$/i);
+  return match ? number(match[1].replace(/,/g, '')) * ({ k: 1e3, m: 1e6, b: 1e9 }[match[2]?.toLowerCase()] ?? 1) : 0;
 }
 
 export function withLeadScore(row, query = '') {
-  const hasScore = typeof row.score === 'number' && Number.isFinite(row.score) && row.score >= 0 && row.score <= 100;
+  const { keyword, city } = splitScoreQuery(query);
+  const words = scoreTokens(keyword);
+  const cities = scoreTokens(city);
   const linkedin = row.source === 'linkedin';
-  const score = hasScore ? row.score : Math.round((linkedin ? linkedinScore(row, query) : mapsScore(row)) * 10) / 10;
-  const segment = score < 25 ? 'Micro' : score < 50 ? 'Small' : score < 75 ? 'Medium' : 'Large';
-  return { ...row, score, scoreBasis: hasScore ? (row.scoreBasis || 'Provided') : linkedin ? 'LinkedIn match' : 'Maps signals', segment };
+  const corroborated = row.source === 'combined' && row.matchVerified === true;
+  const useLinkedIn = linkedin || corroborated;
+  const [industry, liLocation] = text(linkedin ? row.category : corroborated ? row.linkedinCategory : '').split('•');
+  const category = linkedin ? industry : `${text(row.category)} ${industry}`;
+  const categoryFit = overlap(words, category);
+  const nameFit = overlap(words, row.title);
+  const descriptionFit = useLinkedIn ? overlap(words, row.description) : 0;
+  const keywordFit = Math.max(categoryFit, nameFit * (scoreTokens(category).length ? 0.55 : 0.8), descriptionFit * 0.3);
+  const cityFit = overlap(cities, `${text(row.address)} ${liLocation ?? ''}`);
+  const searchFit = round((cities.length ? 35 : 45) * keywordFit + (cities.length ? 10 * cityFit : 0));
+
+  const phone = [row.completePhoneNumber, row.complete_phone_number, row.phoneNumber].some(value => /^\d{8,15}$/.test(text(value).replace(/\D/g, '')));
+  const host = urlHost(row.url);
+  const directory = /(^|\.)(facebook\.com|instagram\.com|linkedin\.com|linktr\.ee|justdial\.com|indiamart\.com|google\.com|wa\.me)$/.test(host);
+  const profile = useLinkedIn && /(^|\.)linkedin\.com$/.test(urlHost(row.linkedinUrl)) && /\/company\/[^/?#]+/.test(text(row.linkedinUrl));
+  const address = Boolean(text(row.address));
+  // Phone and first-party website are the strongest actionable signals.
+  const reachability = (phone ? 17 : 0) + (host ? directory ? 5 : 12 : 0) + (profile ? 4 : 0) + (address ? 2 : 0);
+
+  const reviews = linkedin ? 0 : Math.max(0, number(row.reviews));
+  const stars = Math.max(0, Math.min(5, number(row.stars)));
+  const mapsCredibility = logPoints(reviews, 500, 12) + 8 * Math.max(0, (stars - 2.5) / 2.5) * (reviews / (reviews + 15));
+  const followers = useLinkedIn ? followerCount(row.followers) : 0;
+  const linkedinCredibility = logPoints(followers, 100000, 9);
+  const credibility = round(Math.min(20, Math.max(mapsCredibility, linkedinCredibility) + 0.25 * Math.min(mapsCredibility, linkedinCredibility)));
+
+  const score = round(searchFit + reachability + credibility);
+  const reasons = [categoryFit === 1 && words.length ? 'Category match' : keywordFit ? 'Partial keyword fit' : words.length ? 'Keyword fit unconfirmed' : 'No query context',
+    phone ? 'Phone listed' : host && !directory ? 'Website listed' : profile ? 'LinkedIn profile listed' : host ? 'Directory or social link listed' : 'No outreach channel found'];
+  if (cities.length) reasons.push(cityFit === 1 ? 'City matches' : 'City unconfirmed');
+  const coverage = [Boolean(words.length), Boolean(!cities.length || cityFit === 1), Boolean(scoreTokens(category).length), Boolean(phone || host || profile), Boolean(reviews || followers)].filter(Boolean).length;
+  const evidenceCoverage = coverage >= 5 ? 'High' : coverage >= 3 ? 'Moderate' : 'Limited';
+  const segment = score >= 80 ? 'Top' : score >= 60 ? 'High' : score >= 40 ? 'Moderate' : 'Low';
+  return { ...row, score, scoreVersion: 2, scoreBasis: reasons.join(' · '), segment, evidenceCoverage,
+    scoreBreakdown: { searchFit, reachability, credibility } };
 }
