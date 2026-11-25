@@ -1,17 +1,21 @@
 import writeXlsxFile from 'write-excel-file/browser';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
+import { leadSourceLabel } from './leadSource.js';
 
 export const SaveToDownloads = registerPlugin('SaveToDownloads');
 
 const schema = [
   { column: 'Name', type: String, value: (row) => row.title, width: 30 },
+  { column: 'Source', type: String, value: leadSourceLabel, width: 25 },
   { column: 'Category', type: String, value: (row) => row.category, width: 20 },
   { column: 'No. Of Reviews', type: Number, value: (row) => row.reviews, width: 15 },
   { column: 'Stars', type: Number, value: (row) => row.stars, width: 10 },
   { column: 'Phone Number', type: String, value: (row) => row.completePhoneNumber, width: 20 },
   { column: 'Address', type: String, value: (row) => row.address, width: 60 },
   { column: 'Place Website', type: String, value: (row) => row.url || '', width: 50 },
+  { column: 'LinkedIn Profile', type: String, value: (row) => row.linkedinUrl || '', width: 40 },
+  { column: 'LinkedIn Followers', type: String, value: (row) => row.followers || '', width: 22 },
 ];
 
 function blobToBase64(blob) {
